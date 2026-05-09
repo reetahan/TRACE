@@ -781,7 +781,7 @@ def optimize_global_mixture(params, observed_agg, df, match_stats_df,
         
         def objective_global_phi_k(phi):
             
-            nonlocal  eval_count, last_agg, last_syn_data, best_log_like_seen
+            nonlocal  eval_count, last_agg, last_syn_data, best_log_like_seen, best_log_like_returned
             eval_count += 1
             t_eval_start = time.perf_counter()
             original_phi = params['global_phis'][k]

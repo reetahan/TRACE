@@ -122,35 +122,42 @@ def main():
     overall_mae = np.mean(mae_by_d)
     print(f"Overall district-level utilization MAE: {overall_mae:.2f}%")
 
-    # Plot
+    # Plot 1 — observed vs simulated utilization
     x = np.arange(len(districts))
     w = 0.35
-    fig, axes = plt.subplots(1, 2, figsize=(16, 5))
+    fig1, ax1 = plt.subplots(figsize=(11, 4))
+    ax1.bar(x - w/2, obs_means, w, label='Observed', color='#2166ac', alpha=0.85)
+    ax1.bar(x + w/2, sim_means, w, label='Simulated', color='#d6604d', alpha=0.85)
+    ax1.set_xticks(x)
+    ax1.set_xticklabels([str(d) for d in districts], fontsize=8)
+    ax1.set_xlabel('District')
+    ax1.set_ylabel('Average School Utilization (%)')
+    ax1.legend(fontsize=9)
+    ax1.grid(True, alpha=0.2, axis='y')
+    ax1.set_axisbelow(True)
+    fig1.tight_layout()
+    output_util = args.output.replace('.png', '_utilization.png')
+    fig1.savefig(output_util, dpi=150, bbox_inches='tight')
+    plt.close(fig1)
+    print(f"Saved: {output_util}")
 
-    axes[0].bar(x - w/2, obs_means, w, label='Observed', color='#2166ac', alpha=0.85)
-    axes[0].bar(x + w/2, sim_means, w, label='Simulated', color='#d6604d', alpha=0.85)
-    axes[0].set_xticks(x)
-    axes[0].set_xticklabels([str(d) for d in districts], fontsize=8)
-    axes[0].set_xlabel('District')
-    axes[0].set_ylabel('Average School Utilization (%)')
-    axes[0].legend(fontsize=9)
-    axes[0].grid(True, alpha=0.2, axis='y')
-    axes[0].set_axisbelow(True)
-
-    axes[1].bar(x, mae_by_d, color='#4d9221', alpha=0.85)
-    axes[1].axhline(overall_mae, color='red', linestyle='--', alpha=0.7,
-                    label=f'Overall MAE: {overall_mae:.1f}%')
-    axes[1].set_xticks(x)
-    axes[1].set_xticklabels([str(d) for d in districts], fontsize=8)
-    axes[1].set_xlabel('District')
-    axes[1].set_ylabel('MAE (%)')
-    axes[1].legend(fontsize=9)
-    axes[1].grid(True, alpha=0.2, axis='y')
-    axes[1].set_axisbelow(True)
-
-    plt.tight_layout()
-    plt.savefig(args.output, dpi=150, bbox_inches='tight')
-    print(f"Saved: {args.output}")
+    # Plot 2 — MAE by district
+    fig2, ax2 = plt.subplots(figsize=(11, 4))
+    ax2.bar(x, mae_by_d, color='#4d9221', alpha=0.85)
+    ax2.axhline(overall_mae, color='red', linestyle='--', alpha=0.7,
+                label=f'Overall MAE: {overall_mae:.1f}%')
+    ax2.set_xticks(x)
+    ax2.set_xticklabels([str(d) for d in districts], fontsize=8)
+    ax2.set_xlabel('District')
+    ax2.set_ylabel('MAE (%)')
+    ax2.legend(fontsize=9)
+    ax2.grid(True, alpha=0.2, axis='y')
+    ax2.set_axisbelow(True)
+    fig2.tight_layout()
+    output_mae = args.output.replace('.png', '_mae.png')
+    fig2.savefig(output_mae, dpi=150, bbox_inches='tight')
+    plt.close(fig2)
+    print(f"Saved: {output_mae}")
 
 
 if __name__ == '__main__':
