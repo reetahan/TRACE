@@ -108,7 +108,7 @@ def run_single_simulation(
     for district in districts:
         n_students = int(
             match_stats_df[
-                match_stats_df['Residential District'] == int(district)
+                match_stats_df['Residential District'] == district
             ]['Total Applicants'].iloc[0]
         )
 
@@ -659,12 +659,17 @@ def compute_log_likelihood_gaussian_all_districts(params_global, observed_agg,
             log_file=outfile,
         )
     
+
+    district_map = school_info_df.set_index('School DBN')['District'].to_dict()
     district_obs = defaultdict(list)
     district_sim = defaultdict(list)
+
     for idx, s_name in enumerate(all_schools):
         if not np.isfinite(obs_util[idx]) or not np.isfinite(sim_util[idx]):
             continue
-        district = int(str(s_name)[:2])
+        district = district_map.get(s_name)
+        if district is None:
+            continue
         district_obs[district].append(obs_util[idx])
         district_sim[district].append(sim_util[idx])
 
@@ -673,10 +678,10 @@ def compute_log_likelihood_gaussian_all_districts(params_global, observed_agg,
         obs_mean = np.mean(district_obs[d])
         sim_mean = np.mean(district_sim[d])
         log_and_print(
-            f"  DIST_UTIL {d:02d}: Obs={obs_mean:5.1f}%, Sim={sim_mean:5.1f}%",
+            f"  DIST_UTIL {d}: Obs={obs_mean:5.1f}%, Sim={sim_mean:5.1f}%",
             log_file=outfile
         )
-    
+
     log_and_print("="*60 + "\n", log_file=outfile)
     # Now compute likelihood for each district separately
     total_log_lik = 0

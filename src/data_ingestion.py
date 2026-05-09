@@ -47,7 +47,7 @@ def extract_observed_aggregates(df, match_stats_df):
     for district in districts:
         df_d = df[df['Residential District'] == district]
         match_d = match_stats_df[
-            match_stats_df['Residential District'] == int(district)
+            match_stats_df['Residential District'] == district
         ].iloc[0]
         
         observed[district] = {
@@ -81,6 +81,7 @@ def nyc_preprocess_data(df, match_stats_df, school_info_df, addtl_school_info_df
             
             prog_rows.append({
                 'School DBN': f"{dbn}_prog{i}",
+                'District': dbn[:2],
                 'dbn': dbn,
                 'Capacity': total_cap,
                 'seats_ge': seats_ge,
@@ -101,7 +102,7 @@ def nyc_preprocess_data(df, match_stats_df, school_info_df, addtl_school_info_df
     prog_info_df['school_grade9'] = prog_info_df['dbn'].map(school_util).fillna(0)
     prog_info_df['prog_grade9'] = prog_info_df['school_grade9'] * prog_info_df['cap_share']
     prog_info_df['Utilization'] = (prog_info_df['prog_grade9'] / prog_info_df['Capacity'] * 100).clip(upper=100)
-    school_info_df = prog_info_df[['School DBN', 'Capacity', 'seats_ge', 'seats_swd', 'Utilization']].copy()
+    school_info_df = prog_info_df[['School DBN', 'Capacity', 'seats_ge', 'seats_swd', 'Utilization', 'District']].copy()
 
     df = df[df['Residential District'] != 'Unknown']
     prog_df_rows = []
@@ -151,10 +152,11 @@ def nyc_preprocess_data(df, match_stats_df, school_info_df, addtl_school_info_df
         '# Matches to Choice 1-10': '% Matches to Choice 1-10',
     })
     match_stats_df = match_stats_df.dropna(subset=['Residential District', 'Total Applicants'])
-    match_stats_df['Residential District'] = match_stats_df['Residential District'].astype(int)
-    
-    df['Residential District'] = df['Residential District'].astype(int)
-    school_info_df = prog_info_df[prog_info_df['School DBN'].isin(df['School DBN'])][['School DBN', 'Capacity', 'seats_ge', 'seats_swd', 'Utilization']].copy()
+
+    #match_stats_df['Residential District'] = match_stats_df['Residential District'].astype(int)
+    #df['Residential District'] = df['Residential District'].astype(int)
+
+    school_info_df = prog_info_df[prog_info_df['School DBN'].isin(df['School DBN'])][['School DBN', 'Capacity', 'seats_ge', 'seats_swd', 'Utilization', 'District']].copy()
     
     avg_list_length = df['Total Applicants by Residential District'].sum() / match_stats_df['Total Applicants'].sum()
     log_and_print(f"Average list length from data: {avg_list_length:.2f}")
@@ -240,6 +242,8 @@ def preprocess_chilean_data(indv_df, match_df, school_cap_reg_df, school_cap_df)
         (school_info_df['matched_count'] / school_info_df['Capacity'] * 100).clip(upper=100),
         0.0
     )
-    school_info_df = school_info_df[['School DBN', 'Capacity', 'Utilization']]
+    school_region = df.drop_duplicates('School DBN').set_index('School DBN')['Residential District']
+    school_info_df['District'] = school_info_df['School DBN'].map(school_region)
+    school_info_df = school_info_df[['School DBN', 'Capacity', 'Utilization', 'District']]
     
     return df, new_match_stats_df, school_info_df

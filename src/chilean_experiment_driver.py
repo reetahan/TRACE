@@ -6,6 +6,7 @@ import pickle
 from datetime import datetime
 from em import EM_algorithm
 from data_ingestion import read_data, preprocess_chilean_data
+from constants import LEARNING_RATE
 from util import log_and_print
 from file_config import *
 from welfare import evaluate_simulation_output
@@ -19,11 +20,15 @@ def run_chilean_data_experiment(
     sampling_n_jobs=64,
     max_iter_opt=10,
     seed=40,
+    eta=LEARNING_RATE,
     profile_timing=False,
     outfile=None,
+    imputation_file=None,
     save_best_params=True, 
     save_best_sample=False
 ):
+    
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if outfile is None:
         outfile = f'{EXP_OUT_FOLDER}/chile_res_logs/{timestamp}/chilean_experiment_K={K}_M={M}_iter={max_iter}_opt={max_iter_opt}_seed={seed}_{timestamp}.txt'
@@ -44,9 +49,8 @@ def run_chilean_data_experiment(
         indv_df, match_df, school_cap_reg_df, school_cap_df
     )
 
-    
     district_to_region = {str(r): str(r) for r in df['Residential District'].unique()}
-    list_length_params = return_chilean_list_params(df)
+    list_length_params = return_chilean_list_params(indv_df=indv_df)
 
 
     log_and_print(f"======== Data Loading and Preprocessing Complete =========", outfile)
@@ -58,8 +62,11 @@ def run_chilean_data_experiment(
                 {len(match_stats_df)}", outfile)
     log_and_print(f"Entering EM Algorithm...", outfile)
 
+
     experiment_results = EM_algorithm(
-        df, match_stats_df, school_info_df,
+        df,
+        match_stats_df,
+        school_info_df,
         max_iter=max_iter,
         M_simulations=M,
         K=K,
@@ -67,12 +74,12 @@ def run_chilean_data_experiment(
         sampling_n_jobs=sampling_n_jobs,
         max_iter_opt=max_iter_opt,
         seed=seed,
-        per_school_lottery=True,
-        list_length_params=list_length_params,
         profile_timing=profile_timing,
+        eta=eta,
         priority_config=priority_config,
-        district_to_region=None,
-        save_sample = save_best_sample
+        district_to_region=district_to_region,
+        list_length_params=list_length_params,
+        save_best_sample = save_best_sample
     )
 
     params = experiment_results.params
@@ -126,21 +133,32 @@ def run_chilean_data_experiment(
 if __name__ == "__main__":
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('--K', type=int, default=5, help='Number of mixture components')
+    parser.add_argument('--K', type=int, default=5, help='Number of mixture components for real data')
     parser.add_argument('--M', type=int, default=10, help='Number of simulations per evaluation')
     parser.add_argument('--max_iter', type=int, default=10, help='Maximum EM iterations')
+    parser.add_argument('--lr', type=float, default=LEARNING_RATE, help='Learning rate for sigma nudges')
     parser.add_argument('--max_iter_opt', type=int, default=10, help='Maximum Optimizer iterations')
-    parser.add_argument('--seed', type=int, default=DATA_GENERATION_SEED, help='Random seed')
+    parser.add_argument('--seed', type=int, default=DATA_GENERATION_SEED, help='Random seed for synthetic experiments')
     parser.add_argument('--n_jobs', type=int, default=64, help='Number of parallel workers')
     parser.add_argument('--profile_timing', action='store_true', help='Enable detailed timing logs')
+    parser.add_argument('--imputation_file', type=str, default=None, help='Path to imputation file')
     parser.add_argument('--outfile', type=str, default=None, help='Output file for logs')
     parser.add_argument('--save_params', action='store_true', help='Enable saving of parameters to a pickle file')
-    parser.add_argument('--save_best_sample', action='store_false', help='Enable saving sample of preference profile from best parameters to CSV')
+    parser.add_argument('--save_best_sample', action='store_true', help='Enable saving sample of preference profile from best parameters to CSV')
     args = parser.parse_args()
     
     
-    run_chilean_data_experiment(max_iter=args.max_iter, 
-                M=args.M, K=args.K, sampling_n_jobs=args.n_jobs, 
-                max_iter_opt=args.max_iter_opt, seed=args.seed,
-                profile_timing=args.profile_timing, outfile=args.outfile,
-                save_best_params=args.save_params, save_best_sample=args.save_best_sample)
+    run_chilean_data_experiment(
+        outfile=args.outfile,
+        max_iter=args.max_iter,
+        M=args.M,
+        K=args.K,
+        sampling_n_jobs=args.n_jobs,
+        max_iter_opt=args.max_iter_opt,
+        seed=args.seed,
+        eta=args.lr,
+        profile_timing=args.profile_timing,
+        save_best_params=args.save_params,
+        save_best_sample=args.save_best_sample,
+        imputation_file=args.imputation_file,
+    )
