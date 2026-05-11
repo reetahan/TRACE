@@ -25,13 +25,14 @@ def run_chilean_data_experiment(
     outfile=None,
     imputation_file=None,
     save_best_params=True, 
-    save_best_sample=False
+    save_best_sample=False,
+    max_p=None
 ):
     
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if outfile is None:
-        outfile = f'{EXP_OUT_FOLDER}/chile_res_logs/{timestamp}/chilean_experiment_K={K}_M={M}_iter={max_iter}_opt={max_iter_opt}_seed={seed}_{timestamp}.txt'
+        outfile = f'{EXP_OUT_FOLDER}/chile_res_logs/{timestamp}/chilean_experiment_K={K}_M={M}_iter={max_iter}_opt={max_iter_opt}_lr={eta}_seed={seed}_{timestamp}.txt'
 
     indv_df = read_data(f"{CHILEAN_DATA_DIR}/{CHILEAN_INDV_PREF_FILEPATH}")
     match_df = read_data(f"{CHILEAN_DATA_DIR}/{CHILEAN_MATCH_OUTCOME_FILEPATH}")
@@ -52,6 +53,7 @@ def run_chilean_data_experiment(
     district_to_region = {str(r): str(r) for r in df['Residential District'].unique()}
     list_length_params = return_chilean_list_params(indv_df=indv_df)
 
+    log_and_print(f'Match stats sample:\n{match_stats_df.head()}', outfile)
 
     log_and_print(f"======== Data Loading and Preprocessing Complete =========", outfile)
     log_and_print(f"Parameters:\nMax_iter: {max_iter}\nM: {M}\nK: {K}\nSeed: {seed}\n \
@@ -79,7 +81,8 @@ def run_chilean_data_experiment(
         priority_config=priority_config,
         district_to_region=district_to_region,
         list_length_params=list_length_params,
-        save_best_sample = save_best_sample
+        save_best_sample = save_best_sample,
+        max_p=max_p
     )
 
     params = experiment_results.params
@@ -138,6 +141,7 @@ if __name__ == "__main__":
     parser.add_argument('--max_iter', type=int, default=10, help='Maximum EM iterations')
     parser.add_argument('--lr', type=float, default=LEARNING_RATE, help='Learning rate for sigma nudges')
     parser.add_argument('--max_iter_opt', type=int, default=10, help='Maximum Optimizer iterations')
+    parser.add_argument('--max_p', type=int, default=10, help='Default number of top choices to run loss function against for Chile')
     parser.add_argument('--seed', type=int, default=DATA_GENERATION_SEED, help='Random seed for synthetic experiments')
     parser.add_argument('--n_jobs', type=int, default=64, help='Number of parallel workers')
     parser.add_argument('--profile_timing', action='store_true', help='Enable detailed timing logs')
@@ -160,5 +164,6 @@ if __name__ == "__main__":
         profile_timing=args.profile_timing,
         save_best_params=args.save_params,
         save_best_sample=args.save_best_sample,
+        max_p=args.max_p,
         imputation_file=args.imputation_file,
     )

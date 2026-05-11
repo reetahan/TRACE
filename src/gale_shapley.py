@@ -3,18 +3,26 @@ import pandas as pd
 from util import log_and_print
 from numba import njit
 
-def compute_aggregates(student_rankings, matches, district_assignments, schools_list):
+
+def compute_aggregates(student_rankings, matches, district_assignments, schools_list, max_p=None):
     n_students = len(student_rankings)
     n_schools = len(schools_list)
     districts = np.unique(district_assignments)
     n_districts = len(districts)
+
+    if max_p is None:
+        top_ks = [3, 5, 10]
+        n_stats = 4
+    else:
+        top_ks = list(range(1, max_p + 1))
+        n_stats = max_p + 1
     
     district_to_idx = {d: i for i, d in enumerate(districts)}
     school_to_idx = {s: i for i, s in enumerate(schools_list)}
     
     total_app = np.zeros((n_districts, n_schools))
     true_app = np.zeros((n_districts, n_schools))
-    match_stats = np.zeros((n_districts, 4))
+    match_stats = np.zeros((n_districts, n_stats))
     filled = np.zeros(n_schools)
     
     for student_id in range(n_students):
@@ -43,18 +51,24 @@ def compute_aggregates(student_rankings, matches, district_assignments, schools_
             
             filled[match_school_idx] += 1
             
+            '''
             if match_position < 3:
                 match_stats[district_idx, 0] += 1
             if match_position < 5:
                 match_stats[district_idx, 1] += 1
             if match_position < 10:
                 match_stats[district_idx, 2] += 1
+            '''
+            for k_idx, k in enumerate(top_ks):
+                if match_position < k:
+                    match_stats[district_idx, k_idx] += 1
         else:
             for school in ranking:
                 school_idx = school_to_idx[school]
                 true_app[district_idx, school_idx] += 1
             
-            match_stats[district_idx, 3] += 1
+            #match_stats[district_idx, 3] += 1
+            match_stats[district_idx, len(top_ks)] += 1 
     
 
     for d in range(n_districts):

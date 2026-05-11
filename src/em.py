@@ -62,7 +62,8 @@ def run_single_simulation(
     district_to_region=None, 
     list_length_params=None, 
     save_best_sample=False,
-    run_priority_analysis=False
+    run_priority_analysis=False,
+    max_p=None
 ):
     t_total_start = time.perf_counter()
     timings = {}
@@ -325,7 +326,8 @@ def run_single_simulation(
         all_rankings,
         matches_schools,
         np.array(all_district_assignments),
-        all_schools
+        all_schools, 
+        max_p=max_p
     )
     _mark_timing('compute_aggregates', t_agg_start)
 
@@ -381,7 +383,7 @@ def EM_algorithm(df, match_stats_df, school_info_df,
                  max_iter=10, tol=0.01, K=1, M_simulations=20, seed=40, eta=LEARNING_RATE, outfile=None, 
                  sampling_n_jobs=32, max_iter_opt=5, per_school_lottery=False, 
                  profile_timing=True, priority_config=None, district_to_region=None, 
-                 list_length_params=None, save_best_sample=False):
+                 list_length_params=None, save_best_sample=False, max_p=None):
 
 
     cur_experiment_result = ExperimentResult()
@@ -402,7 +404,7 @@ def EM_algorithm(df, match_stats_df, school_info_df,
     rng_init = np.random.default_rng(seed)
     params = initialize_parameters_global_mixture(districts, df, K, rng=rng_init)
 
-    observed_agg = extract_observed_aggregates(df, match_stats_df)
+    observed_agg = extract_observed_aggregates(df, match_stats_df, max_p=max_p)
     
     log_likelihoods = []
     best_params = None
@@ -426,7 +428,7 @@ def EM_algorithm(df, match_stats_df, school_info_df,
             executor=executor, max_iter_em=max_iter, max_iter_opt=max_iter_opt,
             per_school_lottery=per_school_lottery, priority_config=priority_config,
             district_to_region=district_to_region, list_length_params=list_length_params, 
-            save_best_sample=save_best_sample, best_phis_seen=best_phis_seen
+            save_best_sample=save_best_sample, best_phis_seen=best_phis_seen, max_p=max_p
         )
 
         log_and_print(f"Checking results of optimizing global mixture...", log_file=outfile)
@@ -539,7 +541,7 @@ def compute_log_likelihood_gaussian_all_districts(params_global, observed_agg,
                                                    executor=None, sampling_n_jobs=32, per_school_lottery=False, 
                                                    priority_config=None, district_to_region=None, 
                                                    list_length_params=None, save_best_sample=False, 
-                                                   profile_timing=True, lottery_fixed=None):
+                                                   profile_timing=True, lottery_fixed=None, max_p=None):
 
 
     t_total_start = time.perf_counter()
@@ -566,7 +568,7 @@ def compute_log_likelihood_gaussian_all_districts(params_global, observed_agg,
             sampling_n_jobs=sampling_n_jobs, per_school_lottery=per_school_lottery,
             priority_config=priority_config, district_to_region=district_to_region, 
             list_length_params=list_length_params, save_best_sample=save_best_sample,
-            run_priority_analysis = (sim == M-1)
+            run_priority_analysis = (sim == M-1), max_p=max_p
         )
         if save_best_sample:
             agg, synth_info = res
@@ -620,7 +622,13 @@ def compute_log_likelihood_gaussian_all_districts(params_global, observed_agg,
     log_and_print(f"Fit Diagnostics", log_file=outfile)
     log_and_print("="*60, log_file=outfile)
     
-    metric_names = ["top3", "top5", "top10", "unmatched"]
+    #metric_names = ["top3", "top5", "top10", "unmatched"]
+    n_stats = len(next(iter(observed_agg.values()))['match_stats'])
+    if n_stats == 4:
+        metric_names = ["top3", "top5", "top10", "unmatched"]
+    else:
+        metric_names = [f"top{p}" for p in range(1, n_stats)] + ["unmatched"]
+
     for d_idx, district in enumerate(districts):
         obs = np.array(observed_agg[district]['match_stats'], dtype=float)
         sim = np.array(match_stats_accum[d_idx, :], dtype=float) / M
@@ -766,7 +774,7 @@ def optimize_global_mixture(params, observed_agg, df, match_stats_df,
                             max_iter_em=5, max_iter_opt=5, per_school_lottery=False, 
                             profile_timing=True, priority_config=None, 
                             district_to_region=None, list_length_params=None, 
-                            save_best_sample=False, best_phis_seen=None):
+                            save_best_sample=False, best_phis_seen=None, max_p=None):
 
     t_opt_start = time.perf_counter()
     K = len(params['global_phis'])
@@ -799,7 +807,7 @@ def optimize_global_mixture(params, observed_agg, df, match_stats_df,
                 school_info_df, M=M, seed=seed,  outfile=outfile, 
                 executor=executor, sampling_n_jobs=sampling_n_jobs, per_school_lottery=per_school_lottery, 
                 profile_timing=profile_timing, priority_config=priority_config, district_to_region=district_to_region, 
-                list_length_params=list_length_params, save_best_sample=save_best_sample, lottery_fixed=lottery_fixed
+                list_length_params=list_length_params, save_best_sample=save_best_sample, lottery_fixed=lottery_fixed, max_p=max_p
             )
             if total_log_lik > best_log_like_seen:
                 best_log_like_seen = total_log_lik

@@ -33,7 +33,8 @@ def read_data(file_path, sheet=0, is_first_row_header=False):
 
     return data
 
-def extract_observed_aggregates(df, match_stats_df):
+
+def extract_observed_aggregates(df, match_stats_df, max_p=None):
     """
     Extract observed aggregates for each district
     
@@ -42,8 +43,23 @@ def extract_observed_aggregates(df, match_stats_df):
     """
     observed = {}
     
+    top_k_cols = sorted(
+        [c for c in match_stats_df.columns if c.startswith('% Matches to Choice 1-')],
+        key=lambda c: int(c.split('-')[-1])
+    )
+    if max_p is not None:
+        top_k_cols = [c for c in top_k_cols if int(c.split('-')[-1]) <= max_p]
+
+    if not top_k_cols:
+        top_k_cols = ['% Matches to Choice 1-3', '% Matches to Choice 1-5', '% Matches to Choice 1-10']
+
+    for _, row in match_stats_df.iterrows():
+        district = str(row['Residential District'])
+        stats = [row[c] for c in top_k_cols] + [row['Unmatched']]
+        observed[district] = {'match_stats': np.array(stats)}
+
+    '''
     districts = sorted(df['Residential District'].unique())
-    
     for district in districts:
         df_d = df[df['Residential District'] == district]
         match_d = match_stats_df[
@@ -61,7 +77,7 @@ def extract_observed_aggregates(df, match_stats_df):
             'true_app': df_d['True Applicants by Residential District'].values,
             'schools': df_d['School DBN'].values
         }
-    
+    '''
     return observed
 
 def nyc_preprocess_data(df, match_stats_df, school_info_df, addtl_school_info_df):
@@ -195,7 +211,20 @@ def preprocess_chilean_data(indv_df, match_df, school_cap_reg_df, school_cap_df)
     df['School District'] = df['Region'].astype(str)
     df['Residential District'] = df['Region'].astype(str)
     
-    df['Ratio'] = (df['True Applicants by Residential District'] ** 2) / df['Total Applicants by Residential District'].replace(0, 1)
+
+    # Trying the Ratio based on a Borda score!
+    #df['Ratio'] = (df['True Applicants by Residential District'] ** 2) / df['Total Applicants by Residential District'].replace(0, 1)
+    
+    list_lengths = indv_df.groupby('mrun')['preference_number'].max().rename('L_i')
+    indv_with_L = indv_df.merge(list_lengths, on='mrun')
+    indv_with_L['school_id'] = indv_with_L['rbd'].astype(str) + '_' + indv_with_L['program_code'].astype(str)
+    indv_with_L['borda_contribution'] = (indv_with_L['L_i'] - indv_with_L['preference_number'] + 1) / indv_with_L['L_i']
+    borda = indv_with_L.groupby(['Region', 'school_id'])['borda_contribution'].sum().reset_index()
+    borda.rename(columns={'school_id': 'School DBN', 'Region': 'Residential District'}, inplace=True)
+    df = df.merge(borda[['School DBN', 'Residential District', 'borda_contribution']], 
+                on=['School DBN', 'Residential District'], how='left')
+    df['Ratio'] = df['borda_contribution'].fillna(0)
+    
     df['Rank'] = df.groupby('Residential District')['Ratio'].rank(ascending=False, method='first')
     
     df = df[['School DBN', 'School Name', 'School District', 'Residential District', 
@@ -206,6 +235,30 @@ def preprocess_chilean_data(indv_df, match_df, school_cap_reg_df, school_cap_df)
                 'Total Applicants School', 'Total True Applicants School']:
         df[col] = df[col].astype(int)
 
+    stats = []
+    for _, row in match_df.iterrows():
+        region = row['Region']
+        n_students = row['n_students']
+        matched_fraction = (100 - row['pct_unmatched']) / 100
+
+        max_k = max(
+            int(c.replace('pct_top', ''))
+            for c in match_df.columns
+            if c.startswith('pct_top') and c.replace('pct_top', '').isdigit()
+        )
+
+        stat_row = {
+            'Residential District': str(region),
+            'Total Applicants': int(n_students),
+            'Unmatched': row['pct_unmatched'],
+        }
+        for k in range(1, max_k + 1):
+            cumulative = sum(row[f'pct_top{i}'] for i in range(1, k + 1)) * matched_fraction
+            stat_row[f'% Matches to Choice 1-{k}'] = cumulative
+
+        stats.append(stat_row)
+
+    '''
     stats = []
     for _, row in match_df.iterrows():
         region = row['Region']
@@ -224,7 +277,7 @@ def preprocess_chilean_data(indv_df, match_df, school_cap_reg_df, school_cap_df)
             '% Matches to Choice 1-10': pct_top10,
             'Unmatched': row['pct_unmatched'],
         })
-        
+    '''
     new_match_stats_df = pd.DataFrame(stats)
     
     school_caps = school_cap_df.groupby(['rbd', 'program_code'])['total_capacity'].sum().reset_index()
