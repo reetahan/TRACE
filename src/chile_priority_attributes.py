@@ -471,7 +471,7 @@ def prepare_chile_numba_inputs(
         school_capacities,
         priority_student_seats,
         school_ids,
-    ) = _assign_school_level_priority_tiers_and_dense_scores(app_with_flags, school_table, rng, school_lottery=student_lottery)
+    ) = _assign_school_level_priority_tiers_and_dense_scores(app_with_flags, school_table, rng, student_lottery=student_lottery)
     return PreparedChileNumbaInputs(
         student_ids=student_ids,
         school_ids=school_ids,
