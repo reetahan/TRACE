@@ -1,7 +1,7 @@
 import argparse
 import os
 from datetime import datetime
-from em import EM_algorithm, run_single_simulation
+from em import EM_algorithm
 from welfare import evaluate_simulation_output
 import json
 import pandas as pd

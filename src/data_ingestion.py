@@ -169,7 +169,7 @@ def nyc_preprocess_data(df, match_stats_df, school_info_df, addtl_school_info_df
     })
     match_stats_df = match_stats_df.dropna(subset=['Residential District', 'Total Applicants'])
 
-    #match_stats_df['Residential District'] = match_stats_df['Residential District'].astype(int)
+    match_stats_df['Residential District'] = match_stats_df['Residential District'].astype(str)
     #df['Residential District'] = df['Residential District'].astype(int)
 
     school_info_df = prog_info_df[prog_info_df['School DBN'].isin(df['School DBN'])][['School DBN', 'Capacity', 'seats_ge', 'seats_swd', 'Utilization', 'District']].copy()
