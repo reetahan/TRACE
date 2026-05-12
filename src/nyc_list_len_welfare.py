@@ -167,6 +167,7 @@ def run_matching(
         lottery_1d = np.argsort(lottery_global[:n_students]).astype(np.float64) / n_students
         school_lotteries = np.tile(lottery_1d, (n_schools, 1))
 
+
     student_attrs = None
     matches_schools, student_attrs = run_nyc_priority_matching(
         truncated_rankings=truncated_rankings,
@@ -226,6 +227,8 @@ def run_sweep(params, lottery, df, match_stats_df, school_info_df,
 
     all_schools = df['School DBN'].unique()
     borough_rows = [] 
+    lottery_rows = []
+
 
     for min_len in min_lengths:
         print(f"\n{'='*50}")
@@ -248,8 +251,16 @@ def run_sweep(params, lottery, df, match_stats_df, school_info_df,
         )
 
 
+
+
+        n_students = len(all_district_assignments)
+        lottery_1d = np.argsort(lottery[:n_students]).astype(np.float64) / n_students
+
         attr_df = syn_attrs if syn_attrs is not None else pd.DataFrame()
         attr_df['district'] = list(all_district_assignments)
+        attr_df['lottery'] = lottery_1d
+        attr_df['lottery_decile'] = pd.qcut(lottery_1d, q=10, labels=[f'D{i}' for i in range(1, 11)])
+
 
         welfare_results = evaluate_simulation_output(
             sim_output={
@@ -257,7 +268,7 @@ def run_sweep(params, lottery, df, match_stats_df, school_info_df,
                 'matches_idx':         matches_idx,
                 'student_attributes':  attr_df,
             },
-            categories=['district', 'borough'],
+            categories=['district', 'borough', 'lottery_decile'],
             output_dir=os.path.join(output_dir, f'min_len_{min_len}'),
         )
 
@@ -283,6 +294,18 @@ def run_sweep(params, lottery, df, match_stats_df, school_info_df,
             borough_sweep = borough_sweep.copy()
             borough_sweep['list_length_min'] = min_len
             borough_rows.append(borough_sweep)
+        
+        lottery_sweep = welfare_results.top_p_sweep_by_category.get('lottery_decile')
+        if lottery_sweep is not None:
+            lottery_sweep = lottery_sweep.copy()
+            lottery_sweep['list_length_min'] = min_len
+            lottery_rows.append(lottery_sweep)
+
+    lottery_df = pd.concat(lottery_rows, ignore_index=True) if lottery_rows else None
+    if lottery_df is not None:
+        lottery_path = os.path.join(output_dir, 'sweep_lottery.csv')
+        lottery_df.to_csv(lottery_path, index=False)
+        print(f"Lottery sweep saved to {lottery_path}")
 
     summary_df = pd.DataFrame(summary_rows)
     summary_path = os.path.join(output_dir, 'sweep_summary.csv')
@@ -294,7 +317,7 @@ def run_sweep(params, lottery, df, match_stats_df, school_info_df,
         print(f"\nBorough sweep saved to {borough_path}")
     print(f"\nSummary saved to {summary_path}")
     print(summary_df.to_string(index=False))
-    return summary_df, borough_df
+    return summary_df, borough_df, lottery_df
 
 
 def main():
