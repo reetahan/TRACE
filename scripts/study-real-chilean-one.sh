@@ -16,10 +16,11 @@ M=15
 MAX_ITER=20
 MAX_ITER_OPT=15
 N_JOBS=96
-LR=0.005
+LR=0.05
 PROFILE_TIMING=1
 SAVE_PARAMS=1
 SAVE_BEST_SAMPLE=1
+MAX_P=10
 TIMESTAMP=$(date '+%Y-%m-%d_%H-%M-%S')
 
 PROFILE_ARG=""
@@ -50,7 +51,7 @@ singularity exec --fakeroot --overlay "$OVERLAY:ro" \
     source /ext3/miniconda3/bin/activate 
     export HOME=/ext3/conda_home
     cd /scratch/rm6609/MatchingInferenceEngine
-    python3 src/chilean_experiment_driver.py --seed $SEED --K $K --M $M --lr $LR --max_iter $MAX_ITER --max_iter_opt $MAX_ITER_OPT --n_jobs $N_JOBS $PROFILE_ARG $SAVE_PARAMS $SAVE_BEST_SAMPLE
+    python3 src/chilean_experiment_driver.py --seed $SEED --K $K --M $M --lr $LR --max_iter $MAX_ITER --max_iter_opt $MAX_ITER_OPT  --n_jobs $N_JOBS $PROFILE_ARG $SAVE_PARAMS $SAVE_BEST_SAMPLE
 "
 
 echo "Job End: $(date '+%Y-%m-%d_%H-%M-%S')"

@@ -32,7 +32,7 @@ def run_chilean_data_experiment(
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if outfile is None:
-        outfile = f'{EXP_OUT_FOLDER}/chile_res_logs/{timestamp}/chilean_experiment_K={K}_M={M}_iter={max_iter}_opt={max_iter_opt}_lr={eta}_seed={seed}_{timestamp}.txt'
+        outfile = f'{EXP_OUT_FOLDER}/chile_res_logs/{timestamp}/chilean_experiment_K={K}_M={M}_iter={max_iter}_opt={max_iter_opt}_lr={eta}_maxp={max_p}_seed={seed}_{timestamp}.txt'
 
     indv_df = read_data(f"{CHILEAN_DATA_DIR}/{CHILEAN_INDV_PREF_PROVINCE_FILEPATH }")
     match_df = read_data(f"{CHILEAN_DATA_DIR}/{CHILEAN_MATCH_OUTCOME_PROVINCE_FILEPATH}")
@@ -140,7 +140,7 @@ if __name__ == "__main__":
     parser.add_argument('--max_iter', type=int, default=10, help='Maximum EM iterations')
     parser.add_argument('--lr', type=float, default=LEARNING_RATE, help='Learning rate for sigma nudges')
     parser.add_argument('--max_iter_opt', type=int, default=10, help='Maximum Optimizer iterations')
-    parser.add_argument('--max_p', type=int, default=10, help='Default number of top choices to run loss function against for Chile')
+    parser.add_argument('--max_p', type=int, default=None, help='Default number of top choices to run loss function against for Chile')
     parser.add_argument('--seed', type=int, default=DATA_GENERATION_SEED, help='Random seed for synthetic experiments')
     parser.add_argument('--n_jobs', type=int, default=64, help='Number of parallel workers')
     parser.add_argument('--profile_timing', action='store_true', help='Enable detailed timing logs')
