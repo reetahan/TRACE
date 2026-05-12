@@ -9,7 +9,7 @@ import pandas as pd
 
 from data_ingestion import read_data, nyc_preprocess_data
 from welfare import evaluate_simulation_output
-from file_config import RAW_DATA_DIR, POLISHED_DATA_DIR
+from file_config import *
 from concurrent.futures import ProcessPoolExecutor
 from mallows import _sample_students_chunk
 from gale_shapley import gale_shapley_per_school_numba_wrapper, compute_aggregates 
@@ -23,7 +23,7 @@ def sample_rankings(
     sampling_n_jobs=32,
     sampling_chunk_size=2000,
     list_length_max=12,
-    seed=44,
+    seed=DATA_GENERATION_SEED,
     executor=None,
 ):
     """
@@ -194,7 +194,7 @@ def run_matching(
 
 def run_sweep(params, lottery, df, match_stats_df, school_info_df,
               priority_config, district_to_borough,
-              min_lengths, output_dir, seed, n_jobs):
+              min_lengths, output_dir, seed, n_jobs, save_ranking=False):
 
     rng = np.random.default_rng(seed=seed)
 
@@ -212,6 +212,17 @@ def run_sweep(params, lottery, df, match_stats_df, school_info_df,
         seed=seed
     )
     print(f"  Sampled {len(all_rankings)} student rankings")
+    if save_ranking:
+        ranking_rows = []
+        for i, (ranking, district) in enumerate(zip(all_rankings, all_district_assignments)):
+            row = {'student_id': i, 'district': district}
+            for j, school in enumerate(ranking[:10]):
+                row[f'choice_{j+1}'] = school
+            ranking_rows.append(row)
+        pd.DataFrame(ranking_rows).to_csv(
+            os.path.join(output_dir, 'synthetic_rankings.csv'), index=False
+        )
+        print(f"Saved synthetic rankings to {output_dir}/synthetic_rankings.csv")
 
     all_schools = df['School DBN'].unique()
     borough_rows = [] 
@@ -294,6 +305,7 @@ def main():
     parser.add_argument('--seed',        type=int, default=42)
     parser.add_argument('--n_jobs',      type=int, default=32)
     parser.add_argument('--df_filepath', type=str, default=None)
+    parser.add_argument('--save_ranking', type=bool, default=False)
     args = parser.parse_args()
 
     # Load data
@@ -351,6 +363,7 @@ def main():
         output_dir=args.output_dir,
         seed=args.seed,
         n_jobs=args.n_jobs,
+        save_ranking=args.save_ranking
     )
 
 
