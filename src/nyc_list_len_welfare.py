@@ -325,10 +325,10 @@ def main():
     parser.add_argument('--params',      required=True)
     parser.add_argument('--output_dir',  required=True)
     parser.add_argument('--min_lengths', type=int, nargs='+', default=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
-    parser.add_argument('--seed',        type=int, default=42)
+    parser.add_argument('--seed',        type=int, default=DATA_GENERATION_SEED)
     parser.add_argument('--n_jobs',      type=int, default=32)
     parser.add_argument('--df_filepath', type=str, default=None)
-    parser.add_argument('--save_ranking', type=bool, default=False)
+    parser.add_argument('--save_ranking', action='store_true')
     args = parser.parse_args()
 
     # Load data
