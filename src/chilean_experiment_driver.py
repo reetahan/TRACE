@@ -34,10 +34,9 @@ def run_chilean_data_experiment(
     if outfile is None:
         outfile = f'{EXP_OUT_FOLDER}/chile_res_logs/{timestamp}/chilean_experiment_K={K}_M={M}_iter={max_iter}_opt={max_iter_opt}_lr={eta}_seed={seed}_{timestamp}.txt'
 
-    indv_df = read_data(f"{CHILEAN_DATA_DIR}/{CHILEAN_INDV_PREF_FILEPATH}")
-    match_df = read_data(f"{CHILEAN_DATA_DIR}/{CHILEAN_MATCH_OUTCOME_FILEPATH}")
-    school_cap_df = read_data(f"{CHILEAN_DATA_DIR}/{CHILEAN_SCHOOL_CAPACITY_FILEPATH}")
-    school_cap_reg_df = read_data(f"{CHILEAN_DATA_DIR}/{CHILEAN_SCHOOL_CAPACITY_BY_REGION_FILEPATH}")
+    indv_df = read_data(f"{CHILEAN_DATA_DIR}/{CHILEAN_INDV_PREF_PROVINCE_FILEPATH }")
+    match_df = read_data(f"{CHILEAN_DATA_DIR}/{CHILEAN_MATCH_OUTCOME_PROVINCE_FILEPATH}")
+    school_cap_df = read_data(f"{CHILEAN_DATA_DIR}/{CHILEAN_SCHOOL_CAPACITY_BY_REGION_PROVINCE_FILEPATH}")
 
     chile_config_path = f"{CHILEAN_DATA_DIR}/{CHILE_CONFIG_FILEPATH}"
     priority_config = None
@@ -47,7 +46,7 @@ def run_chilean_data_experiment(
         log_and_print(f"Loaded Chilean priority config: {chile_config_path}", outfile)
 
     df, match_stats_df, school_info_df = preprocess_chilean_data(
-        indv_df, match_df, school_cap_reg_df, school_cap_df
+        indv_df, match_df, school_cap_df, is_province_level=True
     )
 
     district_to_region = {str(r): str(r) for r in df['Residential District'].unique()}

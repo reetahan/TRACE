@@ -44,16 +44,18 @@ def parse_log(path):
     current_district_obs = {}
     current_district_sim = {}
     current_util = {}
+    current_dist_util = {}
 
     i = 0
     min_mae_util = None
+    
     while i < len(lines):
         line = lines[i].rstrip()
 
         # District fit lines
-        m = re.match(r'^\s*District (\d+):\s*$', line)
+        m = re.match(r'^\s*District (.+):\s*$', line.strip())
         if m:
-            d = int(m.group(1))
+            d = m.group(1).strip()
             obs_line = lines[i+1].strip() if i+1 < len(lines) else ''
             sim_line = lines[i+2].strip() if i+2 < len(lines) else ''
             obs_vals = re.findall(r'([\d.]+)%', obs_line)
@@ -80,6 +82,13 @@ def parse_log(path):
             i += 1
             continue
 
+        m = re.match(r'^\s+DIST_UTIL\s+(.+):\s+Obs=\s*([\d.]+)%,\s+Sim=\s*([\d.]+)%', line)
+        if m:
+            d = m.group(1).strip()
+            current_dist_util[d] = {'obs': float(m.group(2)), 'sim': float(m.group(3))}
+            i += 1
+            continue
+
         # MAE utilization
         m = re.search(r'Mean Absolute Utilization Error:\s+([\d.]+)%', line)
         if m:
@@ -100,13 +109,14 @@ def parse_log(path):
                                  for d in current_district_obs
                                  if d in current_district_sim}
                 best_util     = dict(current_util)
+                best_dist_util = dict(current_dist_util)
                 best_mae_util = current_mae_util if 'current_mae_util' in dir() else None
             i += 1
             continue
 
         i += 1
 
-    return best_ll, best_block, best_util, best_mae_util, min_mae_util
+    return best_ll, best_block, best_util, best_mae_util, min_mae_util, best_dist_util
 
 
 def district_from_dbn(dbn):
@@ -137,7 +147,7 @@ def plot_metric(best_block, metric_idx, metric_key, out_path):
                       label='Simulated', color=SIM_COLOR, alpha=0.85)
 
     ax.set_xticks(x)
-    ax.set_xticklabels([str(d) for d in districts], fontsize=FONT_SIZE)
+    ax.set_xticklabels([str(d) for d in districts], fontsize=FONT_SIZE*0.5, rotation=80)
     ax.set_xlabel('Residential District', fontsize=FONT_SIZE)
     ax.set_ylabel(METRIC_LABELS[metric_key], fontsize=FONT_SIZE)
     ax.legend(fontsize=FONT_SIZE)
@@ -174,7 +184,7 @@ def plot_utilization_by_district(best_util, out_path):
            label='Simulated', color=SIM_COLOR, alpha=0.85)
 
     ax.set_xticks(x)
-    ax.set_xticklabels([str(d) for d in districts], fontsize=FONT_SIZE)
+    ax.set_xticklabels([str(d) for d in districts], fontsize=FONT_SIZE*0.5, rotation=80)
     ax.set_xlabel('District (inferred from school DBN)', fontsize=FONT_SIZE)
     ax.set_ylabel('Average School Utilization (%)', fontsize=FONT_SIZE)
     ax.legend(fontsize=FONT_SIZE)
@@ -186,6 +196,24 @@ def plot_utilization_by_district(best_util, out_path):
     fig.tight_layout()
     savefig(fig, out_path)
 
+def plot_dist_util(dist_util, out_path):
+    districts = sorted(dist_util.keys(), key=str)
+    obs_means = [dist_util[d]['obs'] for d in districts]
+    sim_means = [dist_util[d]['sim'] for d in districts]
+    x = np.arange(len(districts))
+    fig, ax = plt.subplots(figsize=(max(11, len(districts) * 0.7), 4))
+    ax.bar(x - BAR_WIDTH/2, obs_means, BAR_WIDTH, label='Observed', color=OBS_COLOR, alpha=0.85)
+    ax.bar(x + BAR_WIDTH/2, sim_means, BAR_WIDTH, label='Simulated', color=SIM_COLOR, alpha=0.85)
+    ax.set_xticks(x)
+    ax.set_xticklabels([str(d) for d in districts], fontsize=FONT_SIZE*0.5, rotation=80)
+    ax.set_xlabel('District', fontsize=FONT_SIZE)
+    ax.set_ylabel('Average School Utilization (%)', fontsize=FONT_SIZE)
+    ax.legend(fontsize=FONT_SIZE)
+    ax.set_ylim(0, 105)
+    ax.yaxis.grid(True, alpha=0.3, linestyle='--')
+    ax.set_axisbelow(True)
+    fig.tight_layout()
+    savefig(fig, out_path)
 
 
 if __name__ == '__main__':
@@ -198,7 +226,7 @@ if __name__ == '__main__':
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Parsing {args.log} ...")
-    best_ll, best_block, best_util, best_mae_util, min_mae_util = parse_log(args.log)
+    best_ll, best_block, best_util, best_mae_util, min_mae_util, best_dist_util = parse_log(args.log)
 
 
     print(f"\n── Validation Stats ──────────────────────────")
@@ -214,13 +242,19 @@ if __name__ == '__main__':
         raise SystemExit(1)
 
     # Individual metric plots
-    for mi, key in enumerate(METRICS):
+    n_stats = len(next(iter(best_block.values()))['obs'])
+    if n_stats == 4:
+        metrics = ['top3', 'top5', 'top10', 'unmatched']
+    else:
+        metrics = [f'top{p}' for p in range(1, n_stats)] + ['unmatched']
+    for mi, key in enumerate(metrics):
         plot_metric(best_block, mi, key,
                     out_dir / f'val_{key}_by_district.png')
 
     # Utilization by district
-    if len(best_util) >= 20:
-        plot_utilization_by_district(best_util,
-                                     out_dir / 'val_utilization_by_district.png')
+    if best_dist_util:
+        plot_dist_util(best_dist_util, out_dir / 'val_utilization_by_district.png')
+    elif len(best_util) >= 20:
+        plot_utilization_by_district(best_util, out_dir / 'val_utilization_by_district.png')
     else:
         print(f"\nSkipping district utilization plot — only {len(best_util)} schools in best eval.")

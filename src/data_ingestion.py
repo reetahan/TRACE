@@ -179,13 +179,17 @@ def nyc_preprocess_data(df, match_stats_df, school_info_df, addtl_school_info_df
 
     return df, match_stats_df, school_info_df
 
-def preprocess_chilean_data(indv_df, match_df, school_cap_reg_df, school_cap_df):
+def preprocess_chilean_data(indv_df, match_df, school_cap_df, is_province_level=False):
 
+    if(is_province_level):
+        subdivision_col = "Provincia"
+    else:
+        subdivision_col = "Region"
 
     matched_rows = indv_df[indv_df['matched_first_round'] == 1][['mrun', 'rbd', 'program_code', 'preference_number']].copy()
     matched_rows.rename(columns={'preference_number': 'match_rank'}, inplace=True)
 
-    tot_reg = indv_df.groupby(['Region', 'rbd', 'program_code'])['mrun'].nunique().reset_index()
+    tot_reg = indv_df.groupby([subdivision_col, 'rbd', 'program_code'])['mrun'].nunique().reset_index()
     tot_reg.rename(columns={'mrun': 'Total Applicants by Residential District'}, inplace=True)
     
     merged = pd.merge(indv_df, matched_rows[['mrun', 'match_rank']], on='mrun', how='left')
@@ -193,7 +197,7 @@ def preprocess_chilean_data(indv_df, match_df, school_cap_reg_df, school_cap_df)
     
 
     true_df = merged[(merged['preference_number'] >= merged['match_rank']) | (merged['match_rank'] == 9999)]
-    true_reg = true_df.groupby(['Region', 'rbd', 'program_code'])['mrun'].nunique().reset_index()
+    true_reg = true_df.groupby([subdivision_col, 'rbd', 'program_code'])['mrun'].nunique().reset_index()
     true_reg.rename(columns={'mrun': 'True Applicants by Residential District'}, inplace=True)
     
     tot_sch = indv_df.groupby(['rbd', 'program_code'])['mrun'].nunique().reset_index()
@@ -202,14 +206,14 @@ def preprocess_chilean_data(indv_df, match_df, school_cap_reg_df, school_cap_df)
     true_sch = true_df.groupby(['rbd', 'program_code'])['mrun'].nunique().reset_index()
     true_sch.rename(columns={'mrun': 'Total True Applicants School'}, inplace=True)
     
-    df = pd.merge(tot_reg, true_reg, on=['Region', 'rbd', 'program_code'], how='left').fillna(0)
+    df = pd.merge(tot_reg, true_reg, on=[subdivision_col, 'rbd', 'program_code'], how='left').fillna(0)
     df = pd.merge(df, tot_sch, on=['rbd', 'program_code'], how='left').fillna(0)
     df = pd.merge(df, true_sch, on=['rbd', 'program_code'], how='left').fillna(0)
     
     df['School DBN'] = df['rbd'].astype(str) + '_' + df['program_code'].astype(str)
     df['School Name'] = "School_" + df['rbd'].astype(str) + '_' + df['program_code'].astype(str)
-    df['School District'] = df['Region'].astype(str)
-    df['Residential District'] = df['Region'].astype(str)
+    df['School District'] = df[subdivision_col].astype(str)
+    df['Residential District'] = df[subdivision_col].astype(str)
     
 
     # Trying the Ratio based on a Borda score!
@@ -219,8 +223,8 @@ def preprocess_chilean_data(indv_df, match_df, school_cap_reg_df, school_cap_df)
     indv_with_L = indv_df.merge(list_lengths, on='mrun')
     indv_with_L['school_id'] = indv_with_L['rbd'].astype(str) + '_' + indv_with_L['program_code'].astype(str)
     indv_with_L['borda_contribution'] = (indv_with_L['L_i'] - indv_with_L['preference_number'] + 1) / indv_with_L['L_i']
-    borda = indv_with_L.groupby(['Region', 'school_id'])['borda_contribution'].sum().reset_index()
-    borda.rename(columns={'school_id': 'School DBN', 'Region': 'Residential District'}, inplace=True)
+    borda = indv_with_L.groupby([subdivision_col, 'school_id'])['borda_contribution'].sum().reset_index()
+    borda.rename(columns={'school_id': 'School DBN', subdivision_col: 'Residential District'}, inplace=True)
     df = df.merge(borda[['School DBN', 'Residential District', 'borda_contribution']], 
                 on=['School DBN', 'Residential District'], how='left')
     df['Ratio'] = df['borda_contribution'].fillna(0)
@@ -237,7 +241,7 @@ def preprocess_chilean_data(indv_df, match_df, school_cap_reg_df, school_cap_df)
 
     stats = []
     for _, row in match_df.iterrows():
-        region = row['Region']
+        region = row[subdivision_col]
         n_students = row['n_students']
         matched_fraction = (100 - row['pct_unmatched']) / 100
 
@@ -261,7 +265,7 @@ def preprocess_chilean_data(indv_df, match_df, school_cap_reg_df, school_cap_df)
     '''
     stats = []
     for _, row in match_df.iterrows():
-        region = row['Region']
+        region = row[subdivision_col]
         n_students = row['n_students']
         
         matched_fraction = (100 - row['pct_unmatched']) / 100
@@ -284,9 +288,10 @@ def preprocess_chilean_data(indv_df, match_df, school_cap_reg_df, school_cap_df)
     school_caps['School DBN'] = school_caps['rbd'].astype(str) + '_' + school_caps['program_code'].astype(str)
     school_caps = school_caps[['School DBN', 'total_capacity']].rename(columns={'total_capacity': 'Capacity'})
    
-    admitted = school_cap_reg_df.groupby(['rbd', 'program_code'])['n_admitted'].sum().reset_index()
+    admitted = indv_df[indv_df['matched_first_round'] == 1].groupby(['rbd', 'program_code'])['mrun'].nunique().reset_index()
+    admitted.rename(columns={'mrun': 'matched_count'}, inplace=True)
     admitted['School DBN'] = admitted['rbd'].astype(str) + '_' + admitted['program_code'].astype(str)
-    admitted = admitted[['School DBN', 'n_admitted']].rename(columns={'n_admitted': 'matched_count'})
+    admitted = admitted[['School DBN', 'matched_count']]
     
     school_info_df = pd.merge(school_caps, admitted, on='School DBN', how='left')
     school_info_df['matched_count'] = school_info_df['matched_count'].fillna(0)
