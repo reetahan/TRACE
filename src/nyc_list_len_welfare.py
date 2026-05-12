@@ -41,7 +41,7 @@ def sample_rankings(
     for district in districts:
         n_students = int(
             match_stats_df[
-                match_stats_df['Residential District'] == int(district)
+                match_stats_df['Residential District'] == district
             ]['Total Applicants'].iloc[0]
         )
         sigma_d = params['districts'][district]['central_ranking']
@@ -213,17 +213,6 @@ def run_sweep(params, lottery, df, match_stats_df, school_info_df,
         seed=seed
     )
     print(f"  Sampled {len(all_rankings)} student rankings")
-    if save_ranking:
-        ranking_rows = []
-        for i, (ranking, district) in enumerate(zip(all_rankings, all_district_assignments)):
-            row = {'student_id': i, 'district': district}
-            for j, school in enumerate(ranking[:10]):
-                row[f'choice_{j+1}'] = school
-            ranking_rows.append(row)
-        pd.DataFrame(ranking_rows).to_csv(
-            os.path.join(output_dir, 'synthetic_rankings.csv'), index=False
-        )
-        print(f"Saved synthetic rankings to {output_dir}/synthetic_rankings.csv")
 
     all_schools = df['School DBN'].unique()
     borough_rows = [] 
@@ -249,6 +238,18 @@ def run_sweep(params, lottery, df, match_stats_df, school_info_df,
             priority_config=priority_config,
             per_school_lottery=False,
         )
+
+        if save_ranking and min_len == 1:
+            ranking_rows = []
+            for i, (ranking, district) in enumerate(zip(all_rankings, all_district_assignments)):
+                row = {'student_id': i, 'district': district}
+                for j, school in enumerate(ranking[:10]):
+                    row[f'choice_{j+1}'] = school
+                ranking_rows.append(row)
+            pd.DataFrame(ranking_rows).to_csv(
+                os.path.join(output_dir, 'synthetic_rankings.csv'), index=False
+            )
+            print(f"Saved synthetic rankings to {output_dir}/synthetic_rankings.csv")
 
 
 
