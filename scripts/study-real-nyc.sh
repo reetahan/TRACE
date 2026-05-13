@@ -20,6 +20,7 @@ LR=0.01
 PROFILE_TIMING=1
 SAVE_PARAMS=1
 SAVE_BEST_SAMPLE=1
+LIST_LEN_DIST=1
 TIMESTAMP=$(date '+%Y-%m-%d_%H-%M-%S')
 
 PROFILE_ARG=""
@@ -37,6 +38,10 @@ if [[ "$SAVE_BEST_SAMPLE" -eq 1 ]]; then
     SAVE_BEST_SAMPLE="--save_best_sample"
 fi
 
+LIST_LEN_DIST=""
+if [[ "$LIST_LEN_DIST" -eq 1 ]]; then
+    LIST_LEN_DIST="--run_gaussian_per_district"
+fi
 echo "========================================"
 echo "Job Start: $TIMESTAMP | Seed: $SEED"
 echo "Profile timing: $PROFILE_TIMING"
@@ -47,10 +52,10 @@ OVERLAY="/scratch/rm6609/research/overlay-persistent-manual-2.ext3"
 singularity exec --fakeroot --overlay "$OVERLAY:ro" \
 /share/apps/images/cuda13.0.1-cudnn9.13.0-ubuntu-24.04.3.sif \
 /bin/bash -c "
-    source /ext3/miniconda3/bin/activate 
+    conda activate research 
     export HOME=/ext3/conda_home
     cd /scratch/rm6609/MatchingInferenceEngine
-    python3 src/nyc_experiment_driver.py --seed $SEED --K $K --M $M --lr $LR --max_iter $MAX_ITER --max_iter_opt $MAX_ITER_OPT --n_jobs $N_JOBS $PROFILE_ARG $SAVE_PARAMS $SAVE_BEST_SAMPLE
+    python3 src/nyc_experiment_driver.py --seed $SEED --K $K --M $M --lr $LR --max_iter $MAX_ITER --max_iter_opt $MAX_ITER_OPT --n_jobs $N_JOBS $PROFILE_ARG $SAVE_PARAMS $SAVE_BEST_SAMPLE $LIST_LEN_DIST
 "
 
 echo "Job End: $(date '+%Y-%m-%d_%H-%M-%S')"

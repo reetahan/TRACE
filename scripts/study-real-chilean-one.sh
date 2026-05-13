@@ -48,10 +48,10 @@ OVERLAY="/scratch/rm6609/research/overlay-persistent-manual-2.ext3"
 singularity exec --fakeroot --overlay "$OVERLAY:ro" \
 /share/apps/images/cuda13.0.1-cudnn9.13.0-ubuntu-24.04.3.sif \
 /bin/bash -c "
-    source /ext3/miniconda3/bin/activate 
+    conda activate research
     export HOME=/ext3/conda_home
     cd /scratch/rm6609/MatchingInferenceEngine
-    python3 src/chilean_experiment_driver.py --seed $SEED --K $K --M $M --lr $LR --max_iter $MAX_ITER --max_iter_opt $MAX_ITER_OPT  --n_jobs $N_JOBS  $PROFILE_ARG $SAVE_PARAMS $SAVE_BEST_SAMPLE
+    python3 src/chilean_experiment_driver.py --seed $SEED --K $K --M $M --lr $LR --max_iter $MAX_ITER --max_iter_opt $MAX_ITER_OPT  --n_jobs $N_JOBS --max_p $MAX_P $PROFILE_ARG $SAVE_PARAMS $SAVE_BEST_SAMPLE
 "
 
 echo "Job End: $(date '+%Y-%m-%d_%H-%M-%S')"

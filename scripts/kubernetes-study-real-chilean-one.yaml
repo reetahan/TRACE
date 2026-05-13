@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: chile-em-run
+  name: nyc-em-run-varying-list-lengths
   namespace: eduranker
 spec:
   template:
@@ -14,9 +14,9 @@ spec:
         - |
           pip install numpy pandas scipy numba openpyxl python-dotenv matplotlib scikit-learn &&
           cd /workspace/MatchingInferenceEngine &&
-          python src/chilean_experiment_driver.py \
+          python src/nyc_experiment_driver.py \
             --K=6 --M=15 --max_iter=20 --max_iter_opt=15 \
-            --max_p=10 --lr=0.01 --n_jobs=16 \
+            --lr=0.05 --n_jobs=16 \
             --save_params --save_best_sample
         resources:
           requests:
