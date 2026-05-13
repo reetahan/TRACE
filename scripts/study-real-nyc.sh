@@ -42,7 +42,7 @@ echo "Job Start: $TIMESTAMP | Seed: $SEED"
 echo "Profile timing: $PROFILE_TIMING"
 echo "========================================"
 
-OVERLAY="/scratch/rm6609/research/overlay-persistent-manual.ext3"
+OVERLAY="/scratch/rm6609/research/overlay-persistent-manual-2.ext3"
 
 singularity exec --fakeroot --overlay "$OVERLAY:ro" \
 /share/apps/images/cuda13.0.1-cudnn9.13.0-ubuntu-24.04.3.sif \

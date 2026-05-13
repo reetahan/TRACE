@@ -1,0 +1,83 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: chile-em-run
+  namespace: eduranker
+spec:
+  template:
+    spec:
+      containers:
+      - name: eduranker
+        image: python:3.11-slim
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          pip install numpy pandas scipy numba openpyxl python-dotenv matplotlib scikit-learn &&
+          cd /workspace/MatchingInferenceEngine &&
+          python src/chilean_experiment_driver.py \
+            --K=6 --M=15 --max_iter=20 --max_iter_opt=15 \
+            --max_p=10 --lr=0.01 --n_jobs=16 \
+            --save_params --save_best_sample
+        resources:
+          requests:
+            cpu: "16"
+            memory: "32Gi"
+          limits:
+            cpu: "16"
+            memory: "32Gi"
+        volumeMounts:
+        - name: storage
+          mountPath: /workspace
+        env:
+          - name: EXP_OUT_FOLDER
+            value: /workspace/MatchingInferenceEngine/experimental_output/
+          - name: RAW_DATA_DIR
+            value: /workspace/MatchingInferenceEngine/sample-data/raw-data
+          - name: POLISHED_DATA_DIR
+            value: /workspace/MatchingInferenceEngine/sample-data/data
+          - name: CHILEAN_DATA_DIR
+            value: /workspace/MatchingInferenceEngine/sample-data/data/chilean_data_processed
+          - name: DATA_GENERATION_SEED
+            value: "44"
+          - name: MAIN_AGG_APP_STATS_FILEPATH
+            value: master_data_03_residential_district.xlsx
+          - name: MAIN_AGG_MATCH_STATS_FILEPATH
+            value: DATA3_fall-2024-high-school-offer-results-website-1.xlsx
+          - name: MAIN_AGG_MATCH_STATS_FILEPATH_SHEET
+            value: Match to Choice-District
+          - name: SCHOOL_INFO_STATS_FILEPATH
+            value: DATA4_fall-2025---hs-directory-data.xlsx
+          - name: SCHOOL_INFO_STATS_FILEPATH_SHEET
+            value: Data
+          - name: ADDTL_SCHOOL_INFO_STATS_FILEPATH
+            value: DATA2_fall-2024-admissions_part-ii_suppressed.xlsx
+          - name: ADDTL_SCHOOL_INFO_STATS_FILEPATH_SHEET
+            value: School
+          - name: NYC_CONFIG_FILEPATH
+            value: nyc_priority_config.json
+          - name: CHILEAN_INDV_PREF_FILEPATH
+            value: individual_level_preferences_and_result.xlsx
+          - name: CHILEAN_MATCH_OUTCOME_FILEPATH
+            value: matching_outcome_by_region.xlsx
+          - name: CHILEAN_SCHOOL_CAPACITY_FILEPATH
+            value: school_capacity.xlsx
+          - name: CHILEAN_SCHOOL_CAPACITY_BY_REGION_FILEPATH
+            value: school_capacity_by_region.xlsx
+          - name: CHILEAN_INDV_PREF_PROVINCE_FILEPATH
+            value: individual_level_preferences_and_result_province.xlsx
+          - name: CHILEAN_MATCH_OUTCOME_PROVINCE_FILEPATH
+            value: matching_outcome_by_province.xlsx
+          - name: CHILEAN_SCHOOL_CAPACITY_BY_REGION_PROVINCE_FILEPATH
+            value: school_capacity_with_region_and_province.xlsx
+          - name: CHILE_CONFIG_FILEPATH
+            value: chile_priority_config.json
+          - name: CURRENT_EXPERIMENT_NAME
+            value: NYC
+          - name: CONFIG_FILEPATH
+            value: nyc_priority_config.json
+      volumes:
+      - name: storage
+        persistentVolumeClaim:
+          claimName: eduranker-storage
+      restartPolicy: Never
+  backoffLimit: 0
