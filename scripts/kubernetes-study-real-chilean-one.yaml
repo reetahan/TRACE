@@ -17,7 +17,7 @@ spec:
           python src/nyc_experiment_driver.py \
             --K=6 --M=15 --max_iter=20 --max_iter_opt=15 \
             --lr=0.05 --n_jobs=16 \
-            --save_params --save_best_sample
+            --save_params --save_best_sample --run_gaussian_per_district"
         resources:
           requests:
             cpu: "16"
