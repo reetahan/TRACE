@@ -88,12 +88,19 @@ def run_single_simulation(
 
         if(list_length_mode == 'empirical'):
             list_length_empirical_probs = list_length_params.get('list_length_empirical_probs', None)
-   
+
+        if list_length_mode == 'gaussian_per_district':
+            list_length_mean_per_district = list_length_params.get('list_length_mean_per_district', {})
+            list_length_std = list_length_params.get('list_length_std', 2)
+            list_length_min = list_length_params.get('list_length_min', 1)
 
     districts = list(params['districts'].keys())
     max_schools_in_any_district = max(len(params['districts'][d]['schools']) for d in districts)
     if list_length_mode == 'fixed':
         mallows_k = k_ranking_length
+    elif list_length_mode == 'gaussian_per_district':
+        max_mean = max(list_length_mean_per_district.values())
+        mallows_k = min(max_schools_in_any_district, int(max_mean + 10 * list_length_std) + 1)
     elif list_length_mode == 'gaussian':
         max_stds_above = 10
         mallows_k = min(list_length_max, max_schools_in_any_district) if list_length_max is not None  \
@@ -199,6 +206,17 @@ def run_single_simulation(
             list_lengths = sample_truncated_normal_lengths(
                 n_students=n_students_d,
                 mean=list_length_mean,
+                std=list_length_std,
+                min_len=list_length_min,
+                max_len=max_len_here,
+                rng=rng
+            )
+        elif list_length_mode == "gaussian_per_district":   
+            mu_d = list_length_mean_per_district.get(str(district), list_length_std * 3)
+            max_len_here = len(schools_list)
+            list_lengths = sample_truncated_normal_lengths(
+                n_students=n_students_d,
+                mean=mu_d,
                 std=list_length_std,
                 min_len=list_length_min,
                 max_len=max_len_here,

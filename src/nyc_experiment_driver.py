@@ -10,14 +10,14 @@ import pickle
 from data_ingestion import *
 from util import log_and_print
 from file_config import *
-from list_length import return_nyc_list_params
+from list_length import return_nyc_list_params, return_nyc_list_params_per_district
 from constants import DISTRICT_TO_BOROUGH_MAPPING, LEARNING_RATE
 
 
 def run_real(max_iter=20, M=15, K=12,
              sampling_n_jobs=32, max_iter_opt=5, seed=40, eta=LEARNING_RATE,
              profile_timing=False, outfile=None, imputation_file=None,
-             save_best_params=True, save_best_sample=False):
+             save_best_params=True, save_best_sample=False, is_gaussian_per_district=False):
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     df_filepath = imputation_file
@@ -57,6 +57,9 @@ def run_real(max_iter=20, M=15, K=12,
         df, match_stats_df, school_info_df, addtl_school_info_df
     )
     list_length_params = return_nyc_list_params()
+
+    if is_gaussian_per_district:
+        list_length_params = return_nyc_list_params_per_district(df, match_stats_df)
 
     log_and_print(f"======== Data Loading and Preprocessing Complete =========", outfile)
     log_and_print(f"Parameters:\nMax_iter: {max_iter}\nM: {M}\nK: {K}\nLR: {eta}\nSeed: {seed}\n \
@@ -147,6 +150,7 @@ if __name__ == "__main__":
     parser.add_argument('--imputation_file', type=str, default=None, help='Path to imputation file')
     parser.add_argument('--outfile', type=str, default=None, help='Output file for logs')
     parser.add_argument('--save_params', action='store_true', help='Enable saving of parameters to a pickle file')
+    parser.add_argument('--run_gaussian_per_district', action='store_true', help='Make list length mean district dependent')
     parser.add_argument('--save_best_sample', action='store_true', help='Enable saving sample of preference profile from best parameters to CSV')
     args = parser.parse_args()
     
@@ -163,4 +167,5 @@ if __name__ == "__main__":
         save_best_params=args.save_params,
         save_best_sample=args.save_best_sample,
         imputation_file=args.imputation_file,
+        is_gaussian_per_district=args.run_gaussian_per_district
     )

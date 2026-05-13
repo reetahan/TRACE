@@ -1,5 +1,27 @@
 import numpy as np
 
+def return_nyc_list_params_per_district(df, match_stats_df, std=2, list_length_min=1):
+    """
+    Compute per-district mean list length as total_applications / total_students,
+    using the existing aggregated data already in df and match_stats_df.
+    """
+    total_apps_by_district = (
+        df.groupby('Residential District')['Total Applicants by Residential District']
+        .sum()
+    )
+    total_students_by_district = (
+        match_stats_df.set_index('Residential District')['Total Applicants']
+    )
+    mean_per_district = (total_apps_by_district / total_students_by_district).to_dict()
+    mean_per_district = {str(k): float(v) for k, v in mean_per_district.items()}
+
+    return {
+        "list_length_mode": "gaussian_per_district",
+        "list_length_mean_per_district": mean_per_district,
+        "list_length_std": std,
+        "list_length_min": list_length_min,
+    }
+
 def sample_truncated_normal_lengths(
     n_students,
     mean=10,
