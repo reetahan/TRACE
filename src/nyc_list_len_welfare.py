@@ -240,17 +240,17 @@ def run_sweep(params, lottery, df, match_stats_df, school_info_df,
         )
 
         if save_ranking and min_len == 1:
+            max_len = max(len(r) for r in syn_rankings)
             ranking_rows = []
-            for i, (ranking, district) in enumerate(zip(all_rankings, all_district_assignments)):
+            for i, (ranking, district) in enumerate(zip(syn_rankings, all_district_assignments)):
                 row = {'student_id': i, 'district': district}
-                for j, school in enumerate(ranking[:10]):
-                    row[f'choice_{j+1}'] = school
+                for j in range(max_len):
+                    row[f'choice_{j+1}'] = ranking[j] if j < len(ranking) else None
                 ranking_rows.append(row)
             pd.DataFrame(ranking_rows).to_csv(
                 os.path.join(output_dir, 'synthetic_rankings.csv'), index=False
             )
             print(f"Saved synthetic rankings to {output_dir}/synthetic_rankings.csv")
-
 
 
 

@@ -283,11 +283,15 @@ def main():
     make_plot(mtb_results, stb_results, 'cond',   args.max_p, args.output_cond,   args.n_stb_runs)
 
     print("\nMTB vs STB summary (all students, unconditional):")
-    print(f"{'p':>4}  {'MTB%':>6}  {'STB%':>6}  {'diff':>7}")
+    print(f"{'p':>4}  {'MTB, Overall%':>6}  {'STB, Overall%':>6}  {'Overall Diff':>7} {'MTB, Female%':>6}  {'STB, Female%':>6}  {'Female Diff':>7} {'MTB, Non-female%':>6}  {'STB, Non-female%':>6}  {'Non-female Diff':>7}")
     for p in range(1, args.max_p + 1):
         mtb_v = mtb_results['all']['uncond'][p]
         stb_v = stb_results['all']['uncond']['mean'][p]
-        print(f"{p:>4}  {mtb_v:>6.1f}  {stb_v:>6.1f}  {stb_v - mtb_v:>+7.1f}pp")
+        mtb_v_f = mtb_results['female']['uncond'][p]
+        stb_v_f = stb_results['female']['uncond']['mean'][p]
+        mtb_v_nf = mtb_results['nonfemale']['uncond'][p]
+        stb_v_nf = stb_results['nonfemale']['uncond']['mean'][p]
+        print(f"{p:>4}  {mtb_v:>6.1f}  {stb_v:>6.1f}  {stb_v - mtb_v:>+7.1f}pp {mtb_v_f:>6.1f}  {stb_v_f:>6.1f} {stb_v_f - mtb_v_f:>+7.1f}pp {mtb_v_nf:>6.1f}  {stb_v_nf:>6.1f}  {stb_v_nf - mtb_v_nf:>+7.1f}pp")
 
 
 if __name__ == '__main__':
