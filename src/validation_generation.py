@@ -310,6 +310,25 @@ if __name__ == '__main__':
     print(f"Parsing {args.log} ...")
     best_ll, best_block, best_util, best_mae_util, min_mae_util, best_dist_util = parse_log(args.log)
 
+    if best_block:
+        sample_vals = next(iter(best_block.values()))
+        n_stats = len(sample_vals['obs'])
+        metrics_here = [f'top{p}' for p in range(1, n_stats)] + ['unmatched']
+        idx_map = {k: i for i, k in enumerate(metrics_here)}
+
+        if 'top3' in idx_map:
+            top3_idx = idx_map['top3']
+            obs_top3 = [best_block[d]['obs'][top3_idx] for d in best_block]
+            sim_top3 = [best_block[d]['sim'][top3_idx] for d in best_block]
+            diffs    = [o - s for o, s in zip(obs_top3, sim_top3)]
+
+            print(f"\n── Top-3 Match Rate Summary ──────────────────")
+            print(f"  Overall obs top-3:       {np.mean(obs_top3):.1f}%")
+            print(f"  Overall sim top-3:       {np.mean(sim_top3):.1f}%")
+            print(f"  Max district diff (obs-sim): {max(diffs):+.1f}pp  ({list(best_block.keys())[diffs.index(max(diffs))]})")
+            print(f"  Min district diff (obs-sim): {min(diffs):+.1f}pp  ({list(best_block.keys())[diffs.index(min(diffs))]})")
+            print(f"  Mean district diff:          {np.mean(diffs):+.1f}pp")
+            print(f"──────────────────────────────────────────────\n")
 
     if args.match_stats:
         match_stats_df = pd.read_excel(args.match_stats)

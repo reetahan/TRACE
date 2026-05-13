@@ -23,6 +23,11 @@ from file_config import (
 from constants import DISTRICT_TO_BOROUGH_MAPPING
 from util import log_and_print
 
+OBS_COLOR = "#0a17d1"
+SIM_COLOR = "#19d308"
+BAR_WIDTH = 0.38
+FONT_SIZE = 10
+LEGEND_FONT_SIZE = 8
 
 def main():
     parser = argparse.ArgumentParser()
@@ -122,42 +127,37 @@ def main():
     overall_mae = np.mean(mae_by_d)
     print(f"Overall district-level utilization MAE: {overall_mae:.2f}%")
 
-    # Plot 1 — observed vs simulated utilization
+    diffs = [o - s for o, s in zip(obs_means, sim_means)]
+    print(f"\n── Utilization Summary ────────────────────────")
+    print(f"  Overall obs utilization:     {np.mean(obs_means):.1f}%")
+    print(f"  Overall sim utilization:     {np.mean(sim_means):.1f}%")
+    print(f"  Max district diff (obs-sim): {max(diffs):+.1f}pp  (District {districts[diffs.index(max(diffs))]})")
+    print(f"  Min district diff (obs-sim): {min(diffs):+.1f}pp  (District {districts[diffs.index(min(diffs))]})")
+    print(f"  Mean district diff:          {np.mean(diffs):+.1f}pp")
+    print(f"  Overall MAE:                 {overall_mae:.2f}%")
+    print(f"──────────────────────────────────────────────\n")
+
+
     x = np.arange(len(districts))
-    w = 0.35
     fig1, ax1 = plt.subplots(figsize=(11, 4))
-    ax1.bar(x - w/2, obs_means, w, label='Observed', color='#2166ac', alpha=0.85)
-    ax1.bar(x + w/2, sim_means, w, label='Simulated', color='#d6604d', alpha=0.85)
+    ax1.bar(x - BAR_WIDTH/2, obs_means, BAR_WIDTH, label='Observed', color=OBS_COLOR, alpha=0.85)
+    ax1.bar(x + BAR_WIDTH/2, sim_means, BAR_WIDTH, label='Simulated', color=SIM_COLOR, alpha=0.85)
     ax1.set_xticks(x)
-    ax1.set_xticklabels([str(d) for d in districts], fontsize=8)
-    ax1.set_xlabel('District')
-    ax1.set_ylabel('Average School Utilization (%)')
-    ax1.legend(fontsize=9)
-    ax1.grid(True, alpha=0.2, axis='y')
+    labels = [str(d) for d in districts]
+    ax1.set_xticklabels(labels)
+    plt.setp(ax1.get_xticklabels(), rotation=0, ha='center', fontsize=FONT_SIZE)
+    ax1.set_ylabel('Average School Utilization (%)', fontsize=FONT_SIZE)
+    ax1.legend(fontsize=LEGEND_FONT_SIZE, loc='upper right')
+    ax1.set_ylim(0, 105)
     ax1.set_axisbelow(True)
+    ax1.tick_params(axis='y', labelsize=FONT_SIZE)
+    fig1.tight_layout()
     fig1.tight_layout()
     output_util = args.output.replace('.png', '_utilization.png')
     fig1.savefig(output_util, dpi=150, bbox_inches='tight')
     plt.close(fig1)
     print(f"Saved: {output_util}")
 
-    # Plot 2 — MAE by district
-    fig2, ax2 = plt.subplots(figsize=(11, 4))
-    ax2.bar(x, mae_by_d, color='#4d9221', alpha=0.85)
-    ax2.axhline(overall_mae, color='red', linestyle='--', alpha=0.7,
-                label=f'Overall MAE: {overall_mae:.1f}%')
-    ax2.set_xticks(x)
-    ax2.set_xticklabels([str(d) for d in districts], fontsize=8)
-    ax2.set_xlabel('District')
-    ax2.set_ylabel('MAE (%)')
-    ax2.legend(fontsize=9)
-    ax2.grid(True, alpha=0.2, axis='y')
-    ax2.set_axisbelow(True)
-    fig2.tight_layout()
-    output_mae = args.output.replace('.png', '_mae.png')
-    fig2.savefig(output_mae, dpi=150, bbox_inches='tight')
-    plt.close(fig2)
-    print(f"Saved: {output_mae}")
 
 
 if __name__ == '__main__':
