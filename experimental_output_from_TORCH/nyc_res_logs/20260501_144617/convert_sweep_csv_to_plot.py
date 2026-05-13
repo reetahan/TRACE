@@ -1,0 +1,163 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+
+BOROUGH_NAMES  = {'M': 'Manhattan', 'X': 'Bronx', 'K': 'Brooklyn',
+                  'Q': 'Queens',    'R': 'Staten Island'}
+BOROUGH_COLORS = {'M': "#035388", 'X': "#3fdff8", 'K': '#27ae60',
+                  'Q': '#8e44ad', 'R': '#f39c12'}
+DECILE_COLORS = {
+    '1':  '#053061',  
+    '2':  '#2166ac',
+    '3':  '#4393c3',
+    '4':  '#92c5de',
+    '5':  '#d1e5f0',
+    '6':  '#fddbc7',
+    '7':  '#f4a582',
+    '8':  '#d6604d',
+    '9':  '#b2182b',
+    '10': '#67001f',  
+}
+
+FONT   = 15
+LEGEND_FONT   = 12
+LWIDTH_OVERALL = 2.5
+LWIDTH_GROUP   = 1.5
+MSIZE  = 6
+
+df         = pd.read_csv('sweep_summary.csv')
+borough_df = pd.read_csv('sweep_borough.csv')
+lottery_df = pd.read_csv('sweep_lottery.csv')
+lottery_df['lottery_decile'] = lottery_df['lottery_decile'].str.replace('D', '', regex=False)
+
+max_p     = borough_df['p'].max()
+b_matched = borough_df[borough_df['p'] == max_p].copy()
+b_matched['pct_matched'] = b_matched['top_p_pct']
+b_stats   = borough_df[borough_df['p'] == 3].copy()
+
+l_matched = lottery_df[lottery_df['p'] == max_p].copy()
+l_matched['pct_matched'] = l_matched['top_p_pct']
+l_stats   = lottery_df[lottery_df['p'] == 3].copy()
+
+def plot_single_metric(overall_val, group_data, group_col, group_values,
+                       group_names, group_colors, linestyle, ylabel, output_path):
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    ax.plot(df['list_length_min'], overall_val,
+            marker='o', color='black', linewidth=LWIDTH_OVERALL,
+            markersize=MSIZE, label='Overall', zorder=5)
+
+    for val in group_values:
+        color = group_colors[val]
+        label = group_names.get(val, val)
+        g = group_data[group_data[group_col] == val].sort_values('list_length_min')
+        if not g.empty:
+            ax.plot(g['list_length_min'], g['top_p_pct'],
+                    color=color, linewidth=LWIDTH_GROUP,
+                    markersize=MSIZE, linestyle=linestyle, label=label)
+
+    ax.relim()
+    ax.autoscale_view()
+
+    ax.set_ylabel(ylabel, fontsize=FONT)
+    ax.tick_params(axis='both', labelsize=FONT)
+    ax.legend(fontsize=LEGEND_FONT, loc='lower right')
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=200, bbox_inches='tight')
+    plt.close(fig)
+    print(f"Saved: {output_path}")
+
+def plot_sweep(overall_df, group_data_matched, group_data_stats,
+               group_col, group_values, group_names, group_colors,
+               linestyle, output_path, overall_vals=None):
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+    if overall_vals is None:
+        overall_vals = {
+            'pct_matched': df['pct_matched'],
+            'avg_rank':    df['avg_rank'],
+            'top_p_pct':   overall_top3['top_p_pct'],
+        }
+    for ax, col in zip(axes, ['pct_matched', 'avg_rank', 'top_p_pct']):
+        ax.plot(overall_df['list_length_min'], overall_vals[col],
+                marker='o', color='black', linewidth=LWIDTH_OVERALL,
+                markersize=MSIZE, label='Overall', zorder=5)
+
+    for val in group_values:
+        color = group_colors[val]
+        label = group_names.get(val, val)
+        gm = group_data_matched[group_data_matched[group_col] == val].sort_values('list_length_min')
+        gs = group_data_stats[group_data_stats[group_col] == val].sort_values('list_length_min')
+        print(f"val: {val}, matched rows: {len(gm)}, stats rows: {len(gs)}")
+        if not gm.empty:
+            axes[0].plot(gm['list_length_min'], gm['pct_matched'],
+                         color=color, linewidth=LWIDTH_GROUP,
+                         markersize=MSIZE, linestyle=linestyle, label=label)
+        if not gs.empty:
+            axes[1].plot(gs['list_length_min'], gs['avg_rank'],
+                         color=color, linewidth=LWIDTH_GROUP,
+                         markersize=MSIZE, linestyle=linestyle, label=label)
+            axes[2].plot(gs['list_length_min'], gs['top_p_pct'],
+                         color=color, linewidth=LWIDTH_GROUP,
+                         markersize=MSIZE, linestyle=linestyle, label=label)
+
+    for ax in axes:
+        ax.relim()
+        ax.autoscale_view()
+        #ax.grid(True, alpha=0.3, linestyle='--')
+        ax.set_xlabel('Minimum List Length', fontsize=FONT)
+        ax.tick_params(axis='both', labelsize=FONT)
+        ax.legend(fontsize=LEGEND_FONT, loc='lower right')
+
+    axes[0].set_ylabel('% Matched', fontsize=FONT)
+    axes[1].set_ylabel('Average Rank', fontsize=FONT)
+    axes[2].set_ylabel('Top-3 Match Rate (%)', fontsize=FONT)
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=200, bbox_inches='tight')
+    plt.close(fig)
+    print(f"Saved: {output_path}")
+
+
+overall_top3 = (
+    borough_df[borough_df['p'] == 3]
+    .groupby('list_length_min')
+    .apply(lambda g: np.average(g['top_p_pct'], weights=g['students']))
+    .reset_index(name='top_p_pct')
+)
+
+overall_vals = {
+    'pct_matched': df['pct_matched'],
+    'avg_rank':    df['avg_rank'],
+    'top_p_pct':   overall_top3['top_p_pct'],
+}
+
+# Figure 1 — borough breakdown
+plot_sweep(
+    overall_df=df,
+    group_data_matched=b_matched,
+    group_data_stats=b_stats,
+    group_col='borough',
+    group_values=['M', 'X', 'K', 'Q', 'R'],
+    group_names=BOROUGH_NAMES,
+    group_colors=BOROUGH_COLORS,
+    linestyle='--',
+    output_path='unmatched_avgrank_top3_min_list_length_borough.png',
+    overall_vals=overall_vals
+)
+
+# Figure 2 — lottery decile breakdown
+plot_sweep(
+    overall_df=df,
+    group_data_matched=l_matched,
+    group_data_stats=l_stats,
+    group_col='lottery_decile',
+    group_values=[f'{i}' for i in range(1, 11)],
+    group_names={f'{i}': f'{i}'.strip(' ()') 
+                 for i in range(1, 11)},
+    group_colors=DECILE_COLORS,
+    linestyle=':',
+    output_path='unmatched_avgrank_top3_min_list_length_lottery.png',
+    overall_vals=overall_vals
+)
+

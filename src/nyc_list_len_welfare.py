@@ -12,9 +12,10 @@ from welfare import evaluate_simulation_output
 from file_config import *
 from concurrent.futures import ProcessPoolExecutor
 from mallows import _sample_students_chunk
-from gale_shapley import gale_shapley_per_school_numba_wrapper, compute_aggregates 
+from gale_shapley import  compute_aggregates 
 from constants import DISTRICT_TO_BOROUGH_MAPPING
 from nyc_priority_attributes import run_nyc_priority_matching
+from list_length import sample_truncated_normal_lengths
 
 
 def sample_rankings(
@@ -112,7 +113,7 @@ def run_matching(
     Isolates the matching step so the same preference profile can be reused
     across multiple list_length_min values.
     """
-    from list_length import sample_truncated_normal_lengths
+    
 
     all_schools = df['School DBN'].unique()
     school_to_idx = {s: i for i, s in enumerate(all_schools)}

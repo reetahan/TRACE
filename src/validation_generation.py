@@ -9,7 +9,6 @@ import argparse
 import pandas as pd
 import numpy as np
 import matplotlib
-from torch import mode
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -253,8 +252,9 @@ def plot_utilization_by_district(best_util, out_path, mode='nyc'):
     else:
         labels = [str(d) for d in districts]
         plt.setp(ax.get_xticklabels(), rotation=0, ha='center', fontsize=FONT_SIZE)
-
+    print(districts)
     ax.set_xlabel('District (inferred from school DBN)', fontsize=FONT_SIZE)
+    ax.set_xticklabels(labels)
     ax.set_ylabel('Average School Utilization (%)', fontsize=FONT_SIZE)
     ax.legend(fontsize=LEGEND_FONT_SIZE, loc='upper right')
     ax.set_ylim(0, 105)
@@ -267,8 +267,10 @@ def plot_utilization_by_district(best_util, out_path, mode='nyc'):
 
 def plot_dist_util(dist_util, out_path, mode='nyc'):
     districts = sorted(dist_util.keys(), key=str)
-    if(mode == 'nyc'):
-        districts = sorted(best_block.keys(), key=lambda d: int(d) if d.isdigit() else d)
+    if mode == 'nyc':
+        districts = sorted(dist_util.keys(), key=lambda d: int(d) if str(d).isdigit() else d)
+    else:
+        districts = sorted(dist_util.keys(), key=str)
     obs_means = [dist_util[d]['obs'] for d in districts]
     sim_means = [dist_util[d]['sim'] for d in districts]
     x = np.arange(len(districts))
@@ -284,7 +286,7 @@ def plot_dist_util(dist_util, out_path, mode='nyc'):
         labels = [str(d) for d in districts]
         plt.setp(ax.get_xticklabels(), rotation=0, ha='center', fontsize=FONT_SIZE)
 
-    ax.set_xlabel('District', fontsize=FONT_SIZE)
+    ax.set_xticklabels(labels)
     ax.set_ylabel('Average School Utilization (%)', fontsize=FONT_SIZE)
     ax.legend(fontsize=LEGEND_FONT_SIZE, loc='upper right')
     ax.set_ylim(0, 105)
@@ -307,6 +309,7 @@ if __name__ == '__main__':
 
     print(f"Parsing {args.log} ...")
     best_ll, best_block, best_util, best_mae_util, min_mae_util, best_dist_util = parse_log(args.log)
+
 
     if args.match_stats:
         match_stats_df = pd.read_excel(args.match_stats)
@@ -356,12 +359,12 @@ if __name__ == '__main__':
         metrics = [f'top{p}' for p in range(1, n_stats)] + ['unmatched']
     for mi, key in enumerate(metrics):
         plot_metric(best_block, mi, key,
-                    out_dir / f'val_{key}_by_district.png', mode=args.mode)
+                    out_dir / f'{args.mode}_val_{key}_by_district.png', mode=args.mode)
 
-    # Utilization by district
+    
     if best_dist_util:
-        plot_dist_util(best_dist_util, out_dir / 'val_utilization_by_district.png', mode=args.mode)
-    elif len(best_util) >= 20:
-        plot_utilization_by_district(best_util, out_dir / 'val_utilization_by_district.png', mode=args.mode)
+        plot_dist_util(best_dist_util, out_dir / f'{args.mode}_val_utilization_by_district.png', mode=args.mode)
+    elif len(best_util) >= 20 and args.mode == 'nyc':
+        plot_utilization_by_district(best_util, out_dir / f'{args.mode}_val_utilization_by_district.png', mode=args.mode)
     else:
         print(f"\nSkipping district utilization plot — only {len(best_util)} schools in best eval.")

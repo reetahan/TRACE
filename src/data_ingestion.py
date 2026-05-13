@@ -49,6 +49,8 @@ def extract_observed_aggregates(df, match_stats_df, max_p=None):
     )
     if max_p is not None:
         top_k_cols = [c for c in top_k_cols if int(c.split('-')[-1]) <= max_p]
+    else:
+        top_k_cols = [c for c in top_k_cols if int(c.split('-')[-1]) in (3, 5, 10)]
 
     if not top_k_cols:
         top_k_cols = ['% Matches to Choice 1-3', '% Matches to Choice 1-5', '% Matches to Choice 1-10']

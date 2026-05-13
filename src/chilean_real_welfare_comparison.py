@@ -25,6 +25,8 @@ import argparse
 import numpy as np
 import pandas as pd
 import matplotlib
+
+from file_config import DATA_GENERATION_SEED
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from typing import List, Dict, Optional
@@ -148,6 +150,7 @@ def compute_top_p_curves(
         result[group] = {
             'uncond': pd.Series(uncond_vals),
             'cond':   pd.Series(cond_vals),
+            'unmatched': 100.0 * (~sub['matched']).sum() / len(sub) if len(sub) > 0 else 0.0,
         }
 
     return result
@@ -226,7 +229,7 @@ def main():
     parser.add_argument('--output_cond',   default='welfare_cond.png')
     parser.add_argument('--n_stb_runs',   type=int, default=10)
     parser.add_argument('--max_p',        type=int, default=10)
-    parser.add_argument('--seed',         type=int, default=42)
+    parser.add_argument('--seed',         type=int, default=DATA_GENERATION_SEED)
     args = parser.parse_args()
 
     print("Loading data...")
@@ -257,7 +260,7 @@ def main():
 
     # STB — n_stb_runs counterfactual runs with single per-student lottery
     print(f"\nRunning {args.n_stb_runs} STB counterfactual runs...")
-    stb_curves: Dict = {g: {'uncond': [], 'cond': []} for g in ['all', 'female', 'nonfemale']}
+    stb_curves: Dict = {g: {'uncond': [], 'cond': [], 'unmatched': []} for g in ['all', 'female', 'nonfemale']}
 
     for run in range(args.n_stb_runs):
         print(f"  STB run {run+1}/{args.n_stb_runs}...")
@@ -272,9 +275,17 @@ def main():
         for g in ['all', 'female', 'nonfemale']:
             stb_curves[g]['uncond'].append(run_curves[g]['uncond'])
             stb_curves[g]['cond'].append(run_curves[g]['cond'])
+            stb_curves[g]['unmatched'].append(run_curves[g]['unmatched'])
 
     stb_results = {
-        g: {cond: aggregate_runs(stb_curves[g][cond]) for cond in ['uncond', 'cond']}
+        g: {
+            'uncond': aggregate_runs(stb_curves[g]['uncond']),
+            'cond':   aggregate_runs(stb_curves[g]['cond']),
+            'unmatched': {
+                'mean': np.mean(stb_curves[g]['unmatched']),
+                'std':  np.std(stb_curves[g]['unmatched']),
+            },
+        }
         for g in ['all', 'female', 'nonfemale']
     }
 
@@ -293,6 +304,15 @@ def main():
         stb_v_nf = stb_results['nonfemale']['uncond']['mean'][p]
         print(f"{p:>4}  {mtb_v:>6.1f}  {stb_v:>6.1f}  {stb_v - mtb_v:>+7.1f}pp {mtb_v_f:>6.1f}  {stb_v_f:>6.1f} {stb_v_f - mtb_v_f:>+7.1f}pp {mtb_v_nf:>6.1f}  {stb_v_nf:>6.1f}  {stb_v_nf - mtb_v_nf:>+7.1f}pp")
 
+    print(f"\nUnmatched rates:")
+    print(f"{'':>4}  {'MTB Overall':>12}  {'STB Overall':>12}  {'MTB Female':>12}  {'STB Female':>12}  {'MTB Non-f':>12}  {'STB Non-f':>12}")
+    mtb_un    = mtb_results['all']['unmatched']
+    stb_un    = stb_results['all']['unmatched']['mean']
+    mtb_un_f  = mtb_results['female']['unmatched']
+    stb_un_f  = stb_results['female']['unmatched']['mean']
+    mtb_un_nf = mtb_results['nonfemale']['unmatched']
+    stb_un_nf = stb_results['nonfemale']['unmatched']['mean']
+    print(f"{'':>4}  {mtb_un:>12.1f}  {stb_un:>12.1f}  {mtb_un_f:>12.1f}  {stb_un_f:>12.1f}  {mtb_un_nf:>12.1f}  {stb_un_nf:>12.1f}")
 
 if __name__ == '__main__':
     main()
