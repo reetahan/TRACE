@@ -28,14 +28,14 @@ if [[ "$PROFILE_TIMING" -eq 1 ]]; then
     PROFILE_ARG="--profile_timing"
 fi
 
-SAVE_PARAMS=""
+SAVE_PARAMS_ARG=""
 if [[ "$SAVE_PARAMS" -eq 1 ]]; then
-    SAVE_PARAMS="--save_params"
+    SAVE_PARAMS_ARG="--save_params"
 fi
 
-SAVE_BEST_SAMPLE=""
+SAVE_BEST_SAMPLE_ARG=""
 if [[ "$SAVE_BEST_SAMPLE" -eq 1 ]]; then
-    SAVE_BEST_SAMPLE="--save_best_sample"
+    SAVE_BEST_SAMPLE_ARG="--save_best_sample"
 fi
 
 echo "========================================"
@@ -48,10 +48,10 @@ OVERLAY="/scratch/rm6609/research/overlay-persistent-manual-2.ext3"
 singularity exec --fakeroot --overlay "$OVERLAY:ro" \
 /share/apps/images/cuda13.0.1-cudnn9.13.0-ubuntu-24.04.3.sif \
 /bin/bash -c "
-    conda activate research
+    source /ext3/miniconda3/bin/activate research
     export HOME=/ext3/conda_home
     cd /scratch/rm6609/MatchingInferenceEngine
-    python3 src/chilean_experiment_driver.py --seed $SEED --K $K --M $M --lr $LR --max_iter $MAX_ITER --max_iter_opt $MAX_ITER_OPT  --n_jobs $N_JOBS --max_p $MAX_P $PROFILE_ARG $SAVE_PARAMS $SAVE_BEST_SAMPLE
+    python3 src/chilean_experiment_driver.py --seed $SEED --K $K --M $M --lr $LR --max_iter $MAX_ITER --max_iter_opt $MAX_ITER_OPT  --n_jobs $N_JOBS --max_p $MAX_P $PROFILE_ARG $SAVE_PARAMS_ARG $SAVE_BEST_SAMPLE_ARG
 "
 
 echo "Job End: $(date '+%Y-%m-%d_%H-%M-%S')"
