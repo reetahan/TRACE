@@ -6,11 +6,14 @@ Usage: python parse_validation.py --log <path> --out <dir>
 
 import re
 import argparse
+import pandas as pd
 import numpy as np
 import matplotlib
+from torch import mode
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from pathlib import Path
+from constants import CHILE_PROVINCE_TO_REGION_MAPPING
 
 METRICS = ['top3', 'top5', 'top10', 'unmatched']
 METRIC_LABELS = {
@@ -22,11 +25,62 @@ METRIC_LABELS = {
 
 OBS_COLOR  = "#0a17d1"
 SIM_COLOR  = "#19d308"
-FONT_SIZE  = 9
+FONT_SIZE  = 10
+LEGEND_FONT_SIZE = 8
+CHILE_REGION_LABEL_SIZE = 8
+CHILE_ROTATION = 45
 BAR_WIDTH  = 0.38
 
+def aggregate_scalar_to_region(block, province_to_region, province_students):
+    region_obs = {}
+    region_sim = {}
+    region_weights = {}
 
-# ── parsing ────────────────────────────────────────────────────────────────
+    for province, vals in block.items():
+        region = province_to_region.get(str(province), str(province))
+        n = province_students.get(str(province), 1)
+        region_obs[region] = region_obs.get(region, 0) + n * vals['obs']
+        region_sim[region] = region_sim.get(region, 0) + n * vals['sim']
+        region_weights[region] = region_weights.get(region, 0) + n
+
+    return {
+        r: {'obs': region_obs[r] / region_weights[r],
+            'sim': region_sim[r] / region_weights[r]}
+        for r in region_obs
+    }
+
+def aggregate_to_region(block, province_to_region, province_students):
+
+    region_obs_weighted = {}
+    region_sim_weighted = {}
+    region_weights = {}
+
+    for province, vals in block.items():
+        region = province_to_region.get(str(province), str(province))
+        n = province_students.get(str(province), 1)  # fallback to 1 if missing
+        if region not in region_obs_weighted:
+            region_obs_weighted[region] = np.zeros(len(vals['obs']))
+            region_sim_weighted[region] = np.zeros(len(vals['sim']))
+            region_weights[region] = 0
+        region_obs_weighted[region] += n * np.array(vals['obs'])
+        region_sim_weighted[region] += n * np.array(vals['sim'])
+        region_weights[region] += n
+
+    return {
+        r: {
+            'obs': (region_obs_weighted[r] / region_weights[r]).tolist(),
+            'sim': (region_sim_weighted[r] / region_weights[r]).tolist(),
+        }
+        for r in region_obs_weighted
+    }
+
+def get_metric_label(key):
+    if key == 'unmatched':
+        return 'Unmatched Rate (%)'
+    m = re.match(r'top(\d+)', key)
+    if m:
+        return f'Top-{m.group(1)} Match Rate (%)'
+    return key
 
 def parse_log(path):
     """
@@ -133,8 +187,10 @@ def savefig(fig, path):
     print(f"Saved: {Path(path).name}")
 
 
-def plot_metric(best_block, metric_idx, metric_key, out_path):
+def plot_metric(best_block, metric_idx, metric_key, out_path, mode='nyc'):
     districts = sorted(best_block.keys())
+    if(mode == 'nyc'):
+        districts = sorted(best_block.keys(), key=lambda d: int(d) if d.isdigit() else d)
     obs_vals  = [best_block[d]['obs'][metric_idx] for d in districts]
     sim_vals  = [best_block[d]['sim'][metric_idx] for d in districts]
 
@@ -146,13 +202,18 @@ def plot_metric(best_block, metric_idx, metric_key, out_path):
     bars_sim = ax.bar(x + BAR_WIDTH/2, sim_vals, BAR_WIDTH,
                       label='Simulated', color=SIM_COLOR, alpha=0.85)
 
+
     ax.set_xticks(x)
-    ax.set_xticklabels([str(d) for d in districts], fontsize=FONT_SIZE*0.5, rotation=80)
-    ax.set_xlabel('Residential District', fontsize=FONT_SIZE)
-    ax.set_ylabel(METRIC_LABELS[metric_key], fontsize=FONT_SIZE)
-    ax.legend(fontsize=FONT_SIZE)
+    if mode == 'chile':
+        labels = [re.sub(r'^de[l]?\s+', '', str(d).replace("Región", "").strip()) for d in districts]
+        plt.setp(ax.get_xticklabels(), rotation=CHILE_ROTATION, ha='right', fontsize=CHILE_REGION_LABEL_SIZE)
+    else:
+        labels = [str(d) for d in districts]
+        plt.setp(ax.get_xticklabels(), rotation=0, ha='center', fontsize=FONT_SIZE)
+    ax.set_xticklabels(labels)
+    ax.set_ylabel(get_metric_label(metric_key), fontsize=FONT_SIZE)
+    ax.legend(fontsize=LEGEND_FONT_SIZE, loc='upper right')
     ax.set_ylim(0, 105)
-    ax.yaxis.grid(True, alpha=0.3, linestyle='--')
     ax.set_axisbelow(True)
     ax.tick_params(axis='y', labelsize=FONT_SIZE)
 
@@ -160,7 +221,7 @@ def plot_metric(best_block, metric_idx, metric_key, out_path):
     savefig(fig, out_path)
 
 
-def plot_utilization_by_district(best_util, out_path):
+def plot_utilization_by_district(best_util, out_path, mode='nyc'):
     """Aggregate per-school utilization to district level."""
     district_obs = {}
     district_sim = {}
@@ -172,6 +233,8 @@ def plot_utilization_by_district(best_util, out_path):
         district_sim.setdefault(d, []).append(vals['sim'])
 
     districts = sorted(set(district_obs) | set(district_sim))
+    if(mode == 'nyc'):
+        districts = sorted(best_block.keys(), key=lambda d: int(d) if d.isdigit() else d)
     obs_means = [np.mean(district_obs.get(d, [np.nan])) for d in districts]
     sim_means = [np.mean(district_sim.get(d, [np.nan])) for d in districts]
 
@@ -184,33 +247,47 @@ def plot_utilization_by_district(best_util, out_path):
            label='Simulated', color=SIM_COLOR, alpha=0.85)
 
     ax.set_xticks(x)
-    ax.set_xticklabels([str(d) for d in districts], fontsize=FONT_SIZE*0.5, rotation=80)
+    if mode == 'chile':
+        labels = [re.sub(r'^de[l]?\s+', '', str(d).replace("Región", "").strip()) for d in districts]
+        plt.setp(ax.get_xticklabels(), rotation=CHILE_ROTATION, ha='right', fontsize=CHILE_REGION_LABEL_SIZE)
+    else:
+        labels = [str(d) for d in districts]
+        plt.setp(ax.get_xticklabels(), rotation=0, ha='center', fontsize=FONT_SIZE)
+
     ax.set_xlabel('District (inferred from school DBN)', fontsize=FONT_SIZE)
     ax.set_ylabel('Average School Utilization (%)', fontsize=FONT_SIZE)
-    ax.legend(fontsize=FONT_SIZE)
+    ax.legend(fontsize=LEGEND_FONT_SIZE, loc='upper right')
     ax.set_ylim(0, 105)
-    ax.yaxis.grid(True, alpha=0.3, linestyle='--')
     ax.set_axisbelow(True)
     ax.tick_params(axis='y', labelsize=FONT_SIZE)
 
     fig.tight_layout()
     savefig(fig, out_path)
 
-def plot_dist_util(dist_util, out_path):
+
+def plot_dist_util(dist_util, out_path, mode='nyc'):
     districts = sorted(dist_util.keys(), key=str)
+    if(mode == 'nyc'):
+        districts = sorted(best_block.keys(), key=lambda d: int(d) if d.isdigit() else d)
     obs_means = [dist_util[d]['obs'] for d in districts]
     sim_means = [dist_util[d]['sim'] for d in districts]
     x = np.arange(len(districts))
     fig, ax = plt.subplots(figsize=(max(11, len(districts) * 0.7), 4))
     ax.bar(x - BAR_WIDTH/2, obs_means, BAR_WIDTH, label='Observed', color=OBS_COLOR, alpha=0.85)
     ax.bar(x + BAR_WIDTH/2, sim_means, BAR_WIDTH, label='Simulated', color=SIM_COLOR, alpha=0.85)
+
     ax.set_xticks(x)
-    ax.set_xticklabels([str(d) for d in districts], fontsize=FONT_SIZE*0.5, rotation=80)
+    if mode == 'chile':
+        labels = [re.sub(r'^de[l]?\s+', '', str(d).replace("Región", "").strip()) for d in districts]
+        plt.setp(ax.get_xticklabels(), rotation=CHILE_ROTATION, ha='right', fontsize=CHILE_REGION_LABEL_SIZE)
+    else:
+        labels = [str(d) for d in districts]
+        plt.setp(ax.get_xticklabels(), rotation=0, ha='center', fontsize=FONT_SIZE)
+
     ax.set_xlabel('District', fontsize=FONT_SIZE)
     ax.set_ylabel('Average School Utilization (%)', fontsize=FONT_SIZE)
-    ax.legend(fontsize=FONT_SIZE)
+    ax.legend(fontsize=LEGEND_FONT_SIZE, loc='upper right')
     ax.set_ylim(0, 105)
-    ax.yaxis.grid(True, alpha=0.3, linestyle='--')
     ax.set_axisbelow(True)
     fig.tight_layout()
     savefig(fig, out_path)
@@ -220,13 +297,43 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--log', required=True)
     parser.add_argument('--out', default='validation_plots')
+    parser.add_argument('--match_stats', required=False, default=None)
+    parser.add_argument('--mode', choices=['nyc', 'chile'], default='nyc')
     args = parser.parse_args()
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+
     print(f"Parsing {args.log} ...")
     best_ll, best_block, best_util, best_mae_util, min_mae_util, best_dist_util = parse_log(args.log)
+
+    if args.match_stats:
+        match_stats_df = pd.read_excel(args.match_stats)
+        province_students = match_stats_df.set_index('Provincia')['n_students'].to_dict()
+        province_students = {str(k): int(v) for k, v in province_students.items()}
+        best_block = aggregate_to_region(best_block, CHILE_PROVINCE_TO_REGION_MAPPING, province_students)
+        best_dist_util = aggregate_scalar_to_region(best_dist_util, CHILE_PROVINCE_TO_REGION_MAPPING, province_students)
+
+    for region in sorted(best_block.keys()):
+        vals = best_block[region]
+        n_stats = len(vals['obs'])
+        # find top3, top10, unmatched indices
+        # metrics list matches what parse_log produces: [top1, top2, ..., unmatched]
+        metrics_here = [f'top{p}' for p in range(1, n_stats)] + ['unmatched']
+        idx = {k: i for i, k in enumerate(metrics_here)}
+        top3    = vals['obs'][idx['top3']]   if 'top3'    in idx else None
+        top10   = vals['obs'][idx['top10']]  if 'top10'   in idx else None
+        unmatched = vals['obs'][idx['unmatched']]
+        top3_sim    = vals['sim'][idx['top3']]   if 'top3'    in idx else None
+        top10_sim   = vals['sim'][idx['top10']]  if 'top10'   in idx else None
+        unmatched_sim = vals['sim'][idx['unmatched']]
+        print(f"  {region}:")
+        if top3 is not None:
+            print(f"    top3:      obs={top3:.1f}%  sim={top3_sim:.1f}%  diff={top3-top3_sim:+.1f}")
+        if top10 is not None:
+            print(f"    top10:     obs={top10:.1f}%  sim={top10_sim:.1f}%  diff={top10-top10_sim:+.1f}")
+        print(f"    unmatched: obs={unmatched:.1f}%  sim={unmatched_sim:.1f}%  diff={unmatched-unmatched_sim:+.1f}")
 
 
     print(f"\n── Validation Stats ──────────────────────────")
@@ -249,12 +356,12 @@ if __name__ == '__main__':
         metrics = [f'top{p}' for p in range(1, n_stats)] + ['unmatched']
     for mi, key in enumerate(metrics):
         plot_metric(best_block, mi, key,
-                    out_dir / f'val_{key}_by_district.png')
+                    out_dir / f'val_{key}_by_district.png', mode=args.mode)
 
     # Utilization by district
     if best_dist_util:
-        plot_dist_util(best_dist_util, out_dir / 'val_utilization_by_district.png')
+        plot_dist_util(best_dist_util, out_dir / 'val_utilization_by_district.png', mode=args.mode)
     elif len(best_util) >= 20:
-        plot_utilization_by_district(best_util, out_dir / 'val_utilization_by_district.png')
+        plot_utilization_by_district(best_util, out_dir / 'val_utilization_by_district.png', mode=args.mode)
     else:
         print(f"\nSkipping district utilization plot — only {len(best_util)} schools in best eval.")
