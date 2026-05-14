@@ -342,15 +342,6 @@ def _prepare_virtual_inputs(
     student_attrs=None
 ) -> _PreparedVirtualInputs:
 
-    if student_attrs is None:
-        student_attrs = _sample_student_attributes(
-            district_assignments=district_assignments,
-            district_to_borough=district_to_borough,
-            rng=rng,
-            borough_swd_fractions=borough_swd_fractions,
-            priority_config=priority_config
-        )
-
     school_overrides = priority_config.get("school_overrides", {})
     if not school_overrides:
         school_overrides = {k: v for k, v in priority_config.items() if k != '__meta__'}
@@ -375,6 +366,15 @@ def _prepare_virtual_inputs(
         for b, v in borough_swd_rates.items()
         if v['total'] > 0
     }
+
+    if student_attrs is None:
+        student_attrs = _sample_student_attributes(
+            district_assignments=district_assignments,
+            district_to_borough=district_to_borough,
+            rng=rng,
+            borough_swd_fractions=borough_swd_fractions,
+            priority_config=priority_config
+        )
 
     student_attrs = _sample_student_attributes(
         district_assignments=district_assignments,
