@@ -376,14 +376,6 @@ def _prepare_virtual_inputs(
             priority_config=priority_config
         )
 
-    student_attrs = _sample_student_attributes(
-        district_assignments=district_assignments,
-        district_to_borough=district_to_borough,
-        rng=rng,
-        borough_swd_fractions=borough_swd_fractions,
-        priority_config=priority_config
-    )
-
     n_students = len(district_assignments)
 
     if len(truncated_rankings) != n_students:

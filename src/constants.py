@@ -35,3 +35,27 @@ CHILE_PROVINCE_TO_REGION_MAPPING = {
     'Talagante': 'Región Metropolitana de Santiago', 'Melipilla': 'Región Metropolitana de Santiago', 
     'Isla de Pascua': 'Región de Valparaíso'
 }
+
+CHILE_REGION_TO_ROMAN = {
+    'Región de Arica y Parinacota':                'XV',
+    'Región de Tarapacá':                          'I',
+    'Región de Antofagasta':                       'II',
+    'Región de Atacama':                           'III',
+    'Región de Coquimbo':                          'IV',
+    'Región de Valparaíso':                        'V',
+    'Región Metropolitana de Santiago':            'XIII',
+    "Región del Libertador Bernardo O'Higgins":    'VI',
+    'Región del Maule':                            'VII',
+    'Región de Ñuble':                             'XVI',
+    'Región del Bío-Bío':                          'VIII',
+    'Región de La Araucanía':                      'IX',
+    'Región de Los Ríos':                          'XIV',
+    'Región de Los Lagos':                         'X',
+    'Región de Aysén del Gral.Ibañez del Campo':   'XI',
+    'Región de Magallanes y Antártica Chilena':    'XII',
+}
+
+ROMAN_ORDER = {v: i for i, v in enumerate([
+    'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII',
+    'IX', 'X', 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 
+])}

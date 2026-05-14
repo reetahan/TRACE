@@ -63,11 +63,15 @@ def main():
     print(f"  Top-5 rate D10:              {d10:.1f}%")
     print(f"  D1 vs D10 top-5 diff:        {d1-d10:+.1f}pp")
     print(f"  Avg rank range:              {metrics['avg_rank'].min():.2f} (D1) to {metrics['avg_rank'].max():.2f} (D10)")
+    print(f"\n── Match Rate by Decile ───────────────────────")
+    for _, row in metrics.iterrows():
+        pct_matched = 100.0 - row['pct_unmatched']
+        print(f"  {row['decile']}: matched={pct_matched:.1f}%  top1={row['top1_pct']:.1f}%  top5={row['top5_pct']:.1f}%  avg_rank={row['avg_rank']:.2f}")
     print(f"──────────────────────────────────────────────\n")
 
     x = np.arange(len(DECILE_LABELS))
 
-    fig, ax1 = plt.subplots(figsize=(12, 5))
+    fig, ax1 = plt.subplots(figsize=(7, 5))
     ax2 = ax1.twinx()
 
     # Left axis — match rates (%)
@@ -95,7 +99,8 @@ def main():
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2,
-               fontsize=LEGEND_FONT, loc='center left')
+               fontsize=LEGEND_FONT, loc='upper center', bbox_to_anchor=(0.5, 1.15),
+          ncol=2, borderaxespad=0)
     
 
     fig.tight_layout()

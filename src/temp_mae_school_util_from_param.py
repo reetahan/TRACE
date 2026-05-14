@@ -9,7 +9,7 @@ from datetime import datetime
 
 from data_ingestion import read_data, nyc_preprocess_data
 from em import run_single_simulation
-from file_config import RAW_DATA_DIR, POLISHED_DATA_DIR, EXP_OUT_FOLDER
+from file_config import RAW_DATA_DIR, POLISHED_DATA_DIR, EXP_OUT_FOLDER, DATA_GENERATION_SEED
 from file_config import (
     MAIN_AGG_APP_STATS_FILEPATH,
     MAIN_AGG_MATCH_STATS_FILEPATH,
@@ -23,18 +23,18 @@ from file_config import (
 from constants import DISTRICT_TO_BOROUGH_MAPPING
 from util import log_and_print
 
-OBS_COLOR = "#0a17d1"
-SIM_COLOR = "#19d308"
+OBS_COLOR  = "#0a17d1"
+SIM_COLOR  = "#c47806"
 BAR_WIDTH = 0.38
-FONT_SIZE = 10
-LEGEND_FONT_SIZE = 8
+FONT_SIZE = 13
+LEGEND_FONT_SIZE = 11
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--params',      required=True, help='Path to saved params pickle')
     parser.add_argument('--output',      default='utilization_by_district.png')
     parser.add_argument('--imputation',  default=None, help='Optional imputation file path')
-    parser.add_argument('--seed',        type=int, default=42)
+    parser.add_argument('--seed',        type=int, default=DATA_GENERATION_SEED)
     parser.add_argument('--list_length_mean', type=float, default=7)
     parser.add_argument('--list_length_std',  type=float, default=2)
     args = parser.parse_args()
@@ -147,11 +147,12 @@ def main():
     ax1.set_xticklabels(labels)
     plt.setp(ax1.get_xticklabels(), rotation=0, ha='center', fontsize=FONT_SIZE)
     ax1.set_ylabel('Average School Utilization (%)', fontsize=FONT_SIZE)
-    ax1.legend(fontsize=LEGEND_FONT_SIZE, loc='upper right')
+    ax1.legend(fontsize=LEGEND_FONT_SIZE, loc='upper center', bbox_to_anchor=(0.5, 1.12),
+          ncol=2, borderaxespad=0)
     ax1.set_ylim(0, 105)
     ax1.set_axisbelow(True)
     ax1.tick_params(axis='y', labelsize=FONT_SIZE)
-    fig1.tight_layout()
+    fig1.tight_layout(rect=[0, 0, 1, 0.93])
     output_util = args.output.replace('.png', '_utilization.png')
     fig1.savefig(output_util, dpi=150, bbox_inches='tight')
     plt.close(fig1)

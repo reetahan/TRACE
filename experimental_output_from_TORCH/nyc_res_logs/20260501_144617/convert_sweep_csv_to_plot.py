@@ -19,8 +19,9 @@ DECILE_COLORS = {
     '10': '#67001f',  
 }
 
+
 FONT   = 15
-LEGEND_FONT   = 12
+LEGEND_FONT   = 13
 LWIDTH_OVERALL = 2.5
 LWIDTH_GROUP   = 1.5
 MSIZE  = 6
@@ -104,16 +105,18 @@ def plot_sweep(overall_df, group_data_matched, group_data_stats,
     for ax in axes:
         ax.relim()
         ax.autoscale_view()
-        #ax.grid(True, alpha=0.3, linestyle='--')
         ax.set_xlabel('Minimum List Length', fontsize=FONT)
         ax.tick_params(axis='both', labelsize=FONT)
-        ax.legend(fontsize=LEGEND_FONT, loc='lower right')
 
     axes[0].set_ylabel('% Matched', fontsize=FONT)
     axes[1].set_ylabel('Average Rank', fontsize=FONT)
     axes[2].set_ylabel('Top-3 Match Rate (%)', fontsize=FONT)
 
-    fig.tight_layout()
+    handles, labels = axes[0].get_legend_handles_labels()
+    n_items = 1 + len(group_values)
+    fig.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, 1.02),
+               ncol=min(n_items, 6), fontsize=LEGEND_FONT, borderaxespad=0)
+    fig.tight_layout(rect=[0, 0, 1, 0.93])
     fig.savefig(output_path, dpi=200, bbox_inches='tight')
     plt.close(fig)
     print(f"Saved: {output_path}")

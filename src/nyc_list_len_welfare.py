@@ -170,7 +170,6 @@ def run_matching(
         school_lotteries = np.tile(lottery_1d, (n_schools, 1))
 
 
-    student_attrs = None
     matches_schools, student_attrs = run_nyc_priority_matching(
         truncated_rankings=truncated_rankings,
         district_assignments=all_district_assignments,
