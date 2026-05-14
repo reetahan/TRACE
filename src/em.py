@@ -431,6 +431,8 @@ def EM_algorithm(df, match_stats_df, school_info_df,
     best_syn_data = None
     best_phis_seen = None
 
+    all_schools = df['School DBN'].unique()
+    obs_total_app, obs_true_app = _build_observed_app_matrices(df, districts, all_schools)
     
     for iteration in range(max_iter):
         log_and_print(f"\n{'='*30}\n EM ITERATION {iteration + 1}/{max_iter} \n{'='*30}", log_file=outfile)
@@ -489,8 +491,13 @@ def EM_algorithm(df, match_stats_df, school_info_df,
             params,
             final_agg,
             school_info_df,
-            eta=eta,
-            all_schools=df['School DBN'].unique(),
+            obs_total=obs_total_app,
+            obs_true=obs_true_app,
+            eta_util=eta,
+            eta_demand=eta,
+            lambda_true=0.7,
+            lambda_total=0.3,
+            all_schools=all_schools,
             outfile=outfile
         )
 
@@ -576,6 +583,8 @@ def compute_log_likelihood_gaussian_all_districts(params_global, observed_agg,
     all_synth_infos = [] if save_best_sample else None
     all_agg_vecs = [] if save_best_sample else None
     
+    total_app_accum = None
+    true_app_accum  = None
     for sim in range(M):
         log_and_print(f"      Simulation {sim+1}/{M}...", log_file=outfile)
         t_sim_start = time.perf_counter()
@@ -601,6 +610,13 @@ def compute_log_likelihood_gaussian_all_districts(params_global, observed_agg,
         else:
             match_stats_accum += agg['match_stats']
         
+        if total_app_accum is None:
+            total_app_accum = agg['total_app'].copy()
+            true_app_accum  = agg['true_app'].copy()
+        else:
+            total_app_accum += agg['total_app']
+            true_app_accum  += agg['true_app']
+
         # Extract stats for EACH district from this single simulation
         for d_idx, district in enumerate(districts):
             agg_vec = agg['match_stats'][d_idx, :]
@@ -782,8 +798,13 @@ def compute_log_likelihood_gaussian_all_districts(params_global, observed_agg,
         )
     
     log_and_print(f"  Match stats log-likelihood: {total_log_lik:.2f}, Util penalty: {util_penalty:.2f}", log_file=outfile)
-    mean_agg = {'filled': total_filled / M, 'match_stats': match_stats_accum / M}
-
+    #mean_agg = {'filled': total_filled / M, 'match_stats': match_stats_accum / M}
+    mean_agg = {
+        'filled':      total_filled / M,
+        'match_stats': match_stats_accum / M,
+        'total_app':   total_app_accum / M,
+        'true_app':    true_app_accum  / M,
+    }
     return total_log_lik , mean_agg, saved_synth_info
 
 def optimize_global_mixture(params, observed_agg, df, match_stats_df, 
@@ -875,37 +896,84 @@ def optimize_global_mixture(params, observed_agg, df, match_stats_df,
     
     return params, last_agg, best_log_like_returned, lottery_fixed, last_syn_data
 
-def nudge_district_sigmas(params, final_agg, school_info_df, eta=LEARNING_RATE, all_schools=None, outfile=None):
+def _build_observed_app_matrices(df, districts, all_schools):
+    district_to_idx = {str(d): i for i, d in enumerate(districts)}
+    school_to_idx   = {str(s): i for i, s in enumerate(all_schools)}
+    n_d, n_s = len(districts), len(all_schools)
+    obs_total = np.zeros((n_d, n_s))
+    obs_true  = np.zeros((n_d, n_s))
+    for _, row in df.iterrows():
+        d_idx = district_to_idx.get(str(row['Residential District']))
+        s_idx = school_to_idx.get(str(row['School DBN']))
+        if d_idx is not None and s_idx is not None:
+            obs_total[d_idx, s_idx] = row['Total Applicants by Residential District']
+            obs_true[d_idx, s_idx]  = row['True Applicants by Residential District']
+    return obs_total, obs_true
+
+def nudge_district_sigmas(
+    params,
+    final_agg,
+    school_info_df,
+    obs_total=None,
+    obs_true=None,
+    eta_util=LEARNING_RATE,
+    eta_demand=LEARNING_RATE,
+    lambda_true=0.7,
+    lambda_total=0.3,
+    all_schools=None,
+    outfile=None
+):
     if all_schools is None:
         all_schools = school_info_df['School DBN'].values
 
+    school_to_idx = {str(s): i for i, s in enumerate(all_schools)}
+    districts     = sorted(params['districts'].keys())
+    district_to_idx = {str(d): i for i, d in enumerate(districts)}
+
+    # utilization error (school-level, same as before)
     sim_filled = pd.Series(final_agg['filled'], index=all_schools)
-    real_util_counts = (school_info_df.set_index('School DBN')['Utilization'] / 100) * school_info_df.set_index('School DBN')['Capacity']
-    
+    real_util_counts = (
+        school_info_df.set_index('School DBN')['Utilization'] / 100
+    ) * school_info_df.set_index('School DBN')['Capacity']
     util_error = real_util_counts - sim_filled
-    
+
+    # demand error (district-school level)
+    use_demand = (
+        obs_total is not None and obs_true is not None
+        and 'total_app' in final_agg and 'true_app' in final_agg
+    )
+    if use_demand:
+        sim_total = final_agg['total_app']
+        sim_true  = final_agg['true_app']
+        sim_total_share = sim_total / sim_total.sum(axis=1, keepdims=True).clip(min=1e-9)
+        sim_true_share  = sim_true  / sim_true.sum(axis=1, keepdims=True).clip(min=1e-9)
+        obs_total_share = obs_total / obs_total.sum(axis=1, keepdims=True).clip(min=1e-9)
+        obs_true_share  = obs_true  / obs_true.sum(axis=1, keepdims=True).clip(min=1e-9)
+        demand_error = (
+            lambda_true  * (obs_true_share  - sim_true_share)
+          + lambda_total * (obs_total_share - sim_total_share)
+        )
+
     for d_id, d_data in params['districts'].items():
         if 'pop_scores' not in d_data:
-            d_data['pop_scores'] = {s: (len(d_data['schools']) - i) 
-                                   for i, s in enumerate(d_data['central_ranking'])}
-        
-        for s_dbn, error in util_error.items():
-            if s_dbn in d_data['pop_scores'] and np.isfinite(error):
-                d_data['pop_scores'][s_dbn] += eta * error 
-        
-        # For logging purposes
-        updates = {s: eta * error for s, error in util_error.items() 
-           if s in d_data['pop_scores'] and np.isfinite(error)}
-        if updates:
-            sorted_updates = sorted(updates.items(), key=lambda x: x[1], reverse=True)
-            top3 = sorted_updates[:3]
-            bot3 = sorted_updates[-3:]
-            for label, group in [("top 3", top3), ("bottom 3", bot3)]:
-                log_and_print(f"    District {d_id} score updates ({label}):", log_file=outfile)
-                for s, v in group:
-                    before = d_data['pop_scores'][s] - v
-                    after = d_data['pop_scores'][s]
-                    log_and_print(f"      {s}: {before:+.2f} -> {after:+.2f} (delta {v:+.2f})", log_file=outfile)
+            d_data['pop_scores'] = {
+                s: (len(d_data['schools']) - i)
+                for i, s in enumerate(d_data['central_ranking'])
+            }
+
+        d_idx = district_to_idx.get(str(d_id))
+
+        for s_dbn in list(d_data['pop_scores'].keys()):
+            s_idx = school_to_idx.get(str(s_dbn))
+            util_err = util_error.get(s_dbn, 0.0)
+            util_contrib = eta_util * util_err if np.isfinite(util_err) else 0.0
+
+            dem_contrib = 0.0
+            if use_demand and d_idx is not None and s_idx is not None:
+                dem_err = demand_error[d_idx, s_idx]
+                dem_contrib = eta_demand * dem_err if np.isfinite(dem_err) else 0.0
+
+            d_data['pop_scores'][s_dbn] += util_contrib + dem_contrib
 
         old_top3 = d_data['central_ranking'][:3] if 'central_ranking' in d_data else []
         new_sigma = sorted(d_data['pop_scores'].items(), key=lambda x: x[1], reverse=True)
@@ -913,5 +981,5 @@ def nudge_district_sigmas(params, final_agg, school_info_df, eta=LEARNING_RATE, 
         new_top3 = d_data['central_ranking'][:3]
         if old_top3 != new_top3:
             log_and_print(f"    District {d_id} sigma changed: {old_top3} -> {new_top3}", log_file=outfile)
-        
+
     return params
