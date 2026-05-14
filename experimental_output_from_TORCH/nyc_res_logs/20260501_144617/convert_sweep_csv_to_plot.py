@@ -180,7 +180,52 @@ print(f"  Overall % matched at min_len={min_len_min}: {pct_at_min:.1f}%")
 print(f"  Overall % matched at min_len={min_len_max}: {pct_at_max:.1f}%")
 print(f"  Borough benefiting most:     {BOROUGH_NAMES[most_benefit]} ({borough_gains[most_benefit]:+.1f}pp)")
 print(f"  Borough benefiting least:    {BOROUGH_NAMES[least_benefit]} ({borough_gains[least_benefit]:+.1f}pp)")
+overall_top3_baseline = overall_top3[overall_top3['list_length_min'] == min_len_min]['top_p_pct'].values[0]
+overall_top3_max = overall_top3[overall_top3['list_length_min'] == min_len_max]['top_p_pct'].values[0]
+print(f"  Overall top-3 rate at baseline (min_len={min_len_min}): {overall_top3_baseline:.1f}%")
+print(f"  Overall top-3 rate at max (min_len={min_len_max}):      {overall_top3_max:.1f}%")
+print(f"  Borough match rates at baseline (min_len={min_len_min}):")
+baseline_borough = b_matched[b_matched['list_length_min'] == min_len_min]
+for b in ['M', 'X', 'K', 'Q', 'R']:
+    sub = baseline_borough[baseline_borough['borough'] == b]
+    if not sub.empty:
+        print(f"    {BOROUGH_NAMES[b]}: {sub['pct_matched'].values[0]:.1f}%")
+print(f"  Borough match rates at max (min_len={min_len_max}):")
+max_borough = b_matched[b_matched['list_length_min'] == min_len_max]
+for b in ['M', 'X', 'K', 'Q', 'R']:
+    sub = max_borough[max_borough['borough'] == b]
+    if not sub.empty:
+        print(f"    {BOROUGH_NAMES[b]}: {sub['pct_matched'].values[0]:.1f}%")
+
+print(f"  Borough top-3 rates at baseline (min_len={min_len_min}):")
+baseline_borough_stats = b_stats[b_stats['list_length_min'] == min_len_min]
+for b in ['M', 'X', 'K', 'Q', 'R']:
+    sub = baseline_borough_stats[baseline_borough_stats['borough'] == b]
+    if not sub.empty:
+        print(f"    {BOROUGH_NAMES[b]}: {sub['top_p_pct'].values[0]:.1f}%")
+
+print(f"  Borough top-3 rates at max (min_len={min_len_max}):")
+max_borough_stats = b_stats[b_stats['list_length_min'] == min_len_max]
+for b in ['M', 'X', 'K', 'Q', 'R']:
+    sub = max_borough_stats[max_borough_stats['borough'] == b]
+    if not sub.empty:
+        print(f"    {BOROUGH_NAMES[b]}: {sub['top_p_pct'].values[0]:.1f}%")
 print(f"──────────────────────────────────────────────\n")
+
+print(f"  Overall avg rank at baseline (min_len={min_len_min}): {df[df['list_length_min'] == min_len_min]['avg_rank'].values[0]:.2f}")
+print(f"  Overall avg rank at max (min_len={min_len_max}):      {df[df['list_length_min'] == min_len_max]['avg_rank'].values[0]:.2f}")
+
+print(f"  Borough avg rank at baseline (min_len={min_len_min}):")
+for b in ['M', 'X', 'K', 'Q', 'R']:
+    sub = b_stats[(b_stats['list_length_min'] == min_len_min) & (b_stats['borough'] == b)]
+    if not sub.empty:
+        print(f"    {BOROUGH_NAMES[b]}: {sub['avg_rank'].values[0]:.2f}")
+
+print(f"  Borough avg rank at max (min_len={min_len_max}):")
+for b in ['M', 'X', 'K', 'Q', 'R']:
+    sub = b_stats[(b_stats['list_length_min'] == min_len_max) & (b_stats['borough'] == b)]
+    if not sub.empty:
+        print(f"    {BOROUGH_NAMES[b]}: {sub['avg_rank'].values[0]:.2f}")
 
 # Fig 7 — lottery decile
 baseline_top3 = l_stats[l_stats['list_length_min'] == min_len_min]
@@ -197,4 +242,43 @@ print(f"\n── Fig 7 Summary ────────────────�
 print(f"  Top-3 rate range at baseline: {top3_at_baseline.min():.1f}% (D{top3_at_baseline.idxmin()}) to {top3_at_baseline.max():.1f}% (D{top3_at_baseline.idxmax()})")
 print(f"  Decile benefiting most from longer lists: D{most_benefit_d} ({decile_gains[most_benefit_d]:+.1f}pp)")
 print(f"  Decile benefiting least:                  D{least_benefit_d} ({decile_gains[least_benefit_d]:+.1f}pp)")
+print(f"  Decile match rates at baseline (min_len={min_len_min}):")
+baseline_lottery = l_matched[l_matched['list_length_min'] == min_len_min]
+for d in [f'{i}' for i in range(1, 11)]:
+    sub = baseline_lottery[baseline_lottery['lottery_decile'] == d]
+    if not sub.empty:
+        print(f"    D{d}: {sub['pct_matched'].values[0]:.1f}%")
+
+print(f"  Decile match rates at max (min_len={min_len_max}):")
+max_lottery = l_matched[l_matched['list_length_min'] == min_len_max]
+for d in [f'{i}' for i in range(1, 11)]:
+    sub = max_lottery[max_lottery['lottery_decile'] == d]
+    if not sub.empty:
+        print(f"    D{d}: {sub['pct_matched'].values[0]:.1f}%")
+
+print(f"  Decile top-3 rates at baseline (min_len={min_len_min}):")
+baseline_lottery_stats = l_stats[l_stats['list_length_min'] == min_len_min]
+for d in [f'{i}' for i in range(1, 11)]:
+    sub = baseline_lottery_stats[baseline_lottery_stats['lottery_decile'] == d]
+    if not sub.empty:
+        print(f"    D{d}: {sub['top_p_pct'].values[0]:.1f}%")
+
+print(f"  Decile top-3 rates at max (min_len={min_len_max}):")
+max_lottery_stats = l_stats[l_stats['list_length_min'] == min_len_max]
+for d in [f'{i}' for i in range(1, 11)]:
+    sub = max_lottery_stats[max_lottery_stats['lottery_decile'] == d]
+    if not sub.empty:
+        print(f"    D{d}: {sub['top_p_pct'].values[0]:.1f}%")
 print(f"──────────────────────────────────────────────\n")
+
+print(f"  Decile avg rank at baseline (min_len={min_len_min}):")
+for d in [f'{i}' for i in range(1, 11)]:
+    sub = l_stats[(l_stats['list_length_min'] == min_len_min) & (l_stats['lottery_decile'] == d)]
+    if not sub.empty:
+        print(f"    D{d}: {sub['avg_rank'].values[0]:.2f}")
+
+print(f"  Decile avg rank at max (min_len={min_len_max}):")
+for d in [f'{i}' for i in range(1, 11)]:
+    sub = l_stats[(l_stats['list_length_min'] == min_len_max) & (l_stats['lottery_decile'] == d)]
+    if not sub.empty:
+        print(f"    D{d}: {sub['avg_rank'].values[0]:.2f}")
