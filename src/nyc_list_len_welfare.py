@@ -14,7 +14,7 @@ from concurrent.futures import ProcessPoolExecutor
 from mallows import _sample_students_chunk
 from gale_shapley import  compute_aggregates 
 from constants import DISTRICT_TO_BOROUGH_MAPPING
-from nyc_priority_attributes import run_nyc_priority_matching
+from nyc_priority_attributes import run_nyc_priority_matching, _sample_student_attributes, _get_tiers
 from list_length import sample_truncated_normal_lengths
 
 
@@ -107,6 +107,7 @@ def run_matching(
     rng,
     priority_config=None,
     per_school_lottery=False,
+    student_attrs=None
 ):
     """
     Given pre-sampled full rankings, applies list length truncation and runs DA.
@@ -178,6 +179,7 @@ def run_matching(
         district_to_borough=DISTRICT_TO_BOROUGH_MAPPING,
         school_lotteries=school_lotteries,
         rng=rng,
+        student_attrs=student_attrs
     )
     matches_idx = np.array([
         school_to_idx.get(s, -1) if s != '-1' else -1
@@ -220,6 +222,36 @@ def run_sweep(params, lottery, df, match_stats_df, school_info_df,
     lottery_rows = []
 
 
+    school_overrides = priority_config.get('school_overrides', {})
+    borough_swd_rates = {}
+    for prog_key, prog_data in school_overrides.items():
+        borough = prog_data.get('borough', '')
+        seats_ge = prog_data.get('seats_ge', 0)
+        seats_swd = prog_data.get('seats_swd', 0)
+        total = seats_ge + seats_swd
+        if total > 0 and borough:
+            if borough not in borough_swd_rates:
+                borough_swd_rates[borough] = {'swd': 0, 'total': 0}
+            borough_swd_rates[borough]['swd'] += seats_swd
+            borough_swd_rates[borough]['total'] += total
+
+    borough_swd_fractions = {
+        b: v['swd'] / v['total']
+        for b, v in borough_swd_rates.items()
+        if v['total'] > 0
+    }
+
+    fixed_student_attrs = _sample_student_attributes(
+        district_assignments=all_district_assignments,
+        district_to_borough=DISTRICT_TO_BOROUGH_MAPPING,
+        rng=rng,
+        borough_swd_fractions=borough_swd_fractions,
+        priority_config=priority_config,
+    )
+
+
+
+
     for min_len in min_lengths:
         print(f"\n{'='*50}")
         print(f"Running list_length_min={min_len}")
@@ -238,6 +270,7 @@ def run_sweep(params, lottery, df, match_stats_df, school_info_df,
             rng=rng,
             priority_config=priority_config,
             per_school_lottery=False,
+            student_attrs=fixed_student_attrs
         )
 
         if save_ranking and min_len == 1:

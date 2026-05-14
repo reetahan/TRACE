@@ -54,6 +54,17 @@ def main():
     metrics = compute_decile_metrics(df)
     print(metrics.to_string(index=False))
 
+    overall_match_rate = 100.0 * df['matched'].mean()
+    d1 = metrics[metrics['decile'] == 'D1']['top5_pct'].values[0]
+    d10 = metrics[metrics['decile'] == 'D10']['top5_pct'].values[0]
+    print(f"\n── Fig 5 Summary ─────────────────────────────")
+    print(f"  Overall match rate:          {overall_match_rate:.1f}%")
+    print(f"  Top-5 rate D1:               {d1:.1f}%")
+    print(f"  Top-5 rate D10:              {d10:.1f}%")
+    print(f"  D1 vs D10 top-5 diff:        {d1-d10:+.1f}pp")
+    print(f"  Avg rank range:              {metrics['avg_rank'].min():.2f} (D1) to {metrics['avg_rank'].max():.2f} (D10)")
+    print(f"──────────────────────────────────────────────\n")
+
     x = np.arange(len(DECILE_LABELS))
 
     fig, ax1 = plt.subplots(figsize=(12, 5))

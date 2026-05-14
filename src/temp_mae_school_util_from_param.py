@@ -129,11 +129,11 @@ def main():
 
     diffs = [o - s for o, s in zip(obs_means, sim_means)]
     print(f"\n── Utilization Summary ────────────────────────")
-    print(f"  Overall obs utilization:     {np.mean(obs_means):.1f}%")
-    print(f"  Overall sim utilization:     {np.mean(sim_means):.1f}%")
-    print(f"  Max district diff (obs-sim): {max(diffs):+.1f}pp  (District {districts[diffs.index(max(diffs))]})")
-    print(f"  Min district diff (obs-sim): {min(diffs):+.1f}pp  (District {districts[diffs.index(min(diffs))]})")
-    print(f"  Mean district diff:          {np.mean(diffs):+.1f}pp")
+    print(f"  Overall obs utilization:     {np.mean(obs_means):.2f}%")
+    print(f"  Overall sim utilization:     {np.mean(sim_means):.2f}%")
+    print(f"  Max district diff (abs):     {max(abs(d) for d in diffs):+.2f}pp  (District {districts[max(range(len(diffs)), key=lambda i: abs(diffs[i]))]})")
+    print(f"  Min district diff (abs):     {min(abs(d) for d in diffs):+.2f}pp  (District {districts[min(range(len(diffs)), key=lambda i: abs(diffs[i]))]})")
+    print(f"  Mean district diff:          {np.mean(diffs):+.2f}pp")
     print(f"  Overall MAE:                 {overall_mae:.2f}%")
     print(f"──────────────────────────────────────────────\n")
 
@@ -151,7 +151,6 @@ def main():
     ax1.set_ylim(0, 105)
     ax1.set_axisbelow(True)
     ax1.tick_params(axis='y', labelsize=FONT_SIZE)
-    fig1.tight_layout()
     fig1.tight_layout()
     output_util = args.output.replace('.png', '_utilization.png')
     fig1.savefig(output_util, dpi=150, bbox_inches='tight')

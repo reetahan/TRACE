@@ -322,12 +322,14 @@ if __name__ == '__main__':
             sim_top3 = [best_block[d]['sim'][top3_idx] for d in best_block]
             diffs    = [o - s for o, s in zip(obs_top3, sim_top3)]
 
+            districts_list = list(best_block.keys())
+            abs_diffs = [abs(d) for d in diffs]
             print(f"\n── Top-3 Match Rate Summary ──────────────────")
-            print(f"  Overall obs top-3:       {np.mean(obs_top3):.1f}%")
-            print(f"  Overall sim top-3:       {np.mean(sim_top3):.1f}%")
-            print(f"  Max district diff (obs-sim): {max(diffs):+.1f}pp  ({list(best_block.keys())[diffs.index(max(diffs))]})")
-            print(f"  Min district diff (obs-sim): {min(diffs):+.1f}pp  ({list(best_block.keys())[diffs.index(min(diffs))]})")
-            print(f"  Mean district diff:          {np.mean(diffs):+.1f}pp")
+            print(f"  Overall obs top-3:           {np.mean(obs_top3):.2f}%")
+            print(f"  Overall sim top-3:           {np.mean(sim_top3):.2f}%")
+            print(f"  Max district diff (abs):     {max(abs_diffs):.2f}pp  ({districts_list[abs_diffs.index(max(abs_diffs))]})")
+            print(f"  Min district diff (abs):     {min(abs_diffs):.2f}pp  ({districts_list[abs_diffs.index(min(abs_diffs))]})")
+            print(f"  Mean abs district diff:      {np.mean(abs_diffs):.2f}pp")
             print(f"──────────────────────────────────────────────\n")
 
     if args.match_stats:
@@ -336,6 +338,21 @@ if __name__ == '__main__':
         province_students = {str(k): int(v) for k, v in province_students.items()}
         best_block = aggregate_to_region(best_block, CHILE_PROVINCE_TO_REGION_MAPPING, province_students)
         best_dist_util = aggregate_scalar_to_region(best_dist_util, CHILE_PROVINCE_TO_REGION_MAPPING, province_students)
+
+        if best_dist_util:
+            dist_list = list(best_dist_util.keys())
+            obs_util_vals = [best_dist_util[d]['obs'] for d in dist_list]
+            sim_util_vals = [best_dist_util[d]['sim'] for d in dist_list]
+            util_diffs = [o - s for o, s in zip(obs_util_vals, sim_util_vals)]
+            abs_util_diffs = [abs(d) for d in util_diffs]
+            print(f"\n── Utilization Summary ────────────────────────")
+            print(f"  Overall obs utilization:     {np.mean(obs_util_vals):.1f}%")
+            print(f"  Overall sim utilization:     {np.mean(sim_util_vals):.1f}%")
+            print(f"  Max district diff (abs):     {max(abs_util_diffs):.1f}pp  ({dist_list[abs_util_diffs.index(max(abs_util_diffs))]})")
+            print(f"  Min district diff (abs):     {min(abs_util_diffs):.1f}pp  ({dist_list[abs_util_diffs.index(min(abs_util_diffs))]})")
+            print(f"  Mean abs district diff:      {np.mean(abs_util_diffs):.1f}pp")
+            print(f"──────────────────────────────────────────────\n")
+
 
     for region in sorted(best_block.keys()):
         vals = best_block[region]
@@ -352,10 +369,10 @@ if __name__ == '__main__':
         unmatched_sim = vals['sim'][idx['unmatched']]
         print(f"  {region}:")
         if top3 is not None:
-            print(f"    top3:      obs={top3:.1f}%  sim={top3_sim:.1f}%  diff={top3-top3_sim:+.1f}")
+            print(f"    top3:      obs={top3:.2f}%  sim={top3_sim:.2f}%  diff={top3-top3_sim:+.2f}")
         if top10 is not None:
-            print(f"    top10:     obs={top10:.1f}%  sim={top10_sim:.1f}%  diff={top10-top10_sim:+.1f}")
-        print(f"    unmatched: obs={unmatched:.1f}%  sim={unmatched_sim:.1f}%  diff={unmatched-unmatched_sim:+.1f}")
+            print(f"    top10:     obs={top10:.2f}%  sim={top10_sim:.2f}%  diff={top10-top10_sim:+.2f}")
+        print(f"    unmatched: obs={unmatched:.2f}%  sim={unmatched_sim:.2f}%  diff={unmatched-unmatched_sim:+.2f}")
 
 
     print(f"\n── Validation Stats ──────────────────────────")

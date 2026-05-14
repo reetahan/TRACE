@@ -161,3 +161,40 @@ plot_sweep(
     overall_vals=overall_vals
 )
 
+# Fig 6 — borough
+min_len_min = df['list_length_min'].min()
+min_len_max = df['list_length_min'].max()
+pct_at_min = df[df['list_length_min'] == min_len_min]['pct_matched'].values[0]
+pct_at_max = df[df['list_length_min'] == min_len_max]['pct_matched'].values[0]
+
+borough_gains = {}
+for b in ['M', 'X', 'K', 'Q', 'R']:
+    sub = b_matched[b_matched['borough'] == b].sort_values('list_length_min')
+    if not sub.empty:
+        borough_gains[b] = sub['pct_matched'].max() - sub['pct_matched'].min()
+
+most_benefit = max(borough_gains, key=borough_gains.get)
+least_benefit = min(borough_gains, key=borough_gains.get)
+print(f"\n── Fig 6 Summary ─────────────────────────────")
+print(f"  Overall % matched at min_len={min_len_min}: {pct_at_min:.1f}%")
+print(f"  Overall % matched at min_len={min_len_max}: {pct_at_max:.1f}%")
+print(f"  Borough benefiting most:     {BOROUGH_NAMES[most_benefit]} ({borough_gains[most_benefit]:+.1f}pp)")
+print(f"  Borough benefiting least:    {BOROUGH_NAMES[least_benefit]} ({borough_gains[least_benefit]:+.1f}pp)")
+print(f"──────────────────────────────────────────────\n")
+
+# Fig 7 — lottery decile
+baseline_top3 = l_stats[l_stats['list_length_min'] == min_len_min]
+decile_gains = {}
+for d in [f'{i}' for i in range(1, 11)]:
+    sub = l_matched[l_matched['lottery_decile'] == d].sort_values('list_length_min')
+    if not sub.empty:
+        decile_gains[d] = sub['pct_matched'].max() - sub['pct_matched'].min()
+
+most_benefit_d = max(decile_gains, key=decile_gains.get)
+least_benefit_d = min(decile_gains, key=decile_gains.get)
+top3_at_baseline = baseline_top3.groupby('lottery_decile')['top_p_pct'].first()
+print(f"\n── Fig 7 Summary ─────────────────────────────")
+print(f"  Top-3 rate range at baseline: {top3_at_baseline.min():.1f}% (D{top3_at_baseline.idxmin()}) to {top3_at_baseline.max():.1f}% (D{top3_at_baseline.idxmax()})")
+print(f"  Decile benefiting most from longer lists: D{most_benefit_d} ({decile_gains[most_benefit_d]:+.1f}pp)")
+print(f"  Decile benefiting least:                  D{least_benefit_d} ({decile_gains[least_benefit_d]:+.1f}pp)")
+print(f"──────────────────────────────────────────────\n")

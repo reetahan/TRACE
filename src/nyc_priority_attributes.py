@@ -339,7 +339,17 @@ def _prepare_virtual_inputs(
     district_to_borough: Dict[str, str],
     school_lotteries: np.ndarray,
     rng: np.random.Generator,
+    student_attrs=None
 ) -> _PreparedVirtualInputs:
+
+    if student_attrs is None:
+        student_attrs = _sample_student_attributes(
+            district_assignments=district_assignments,
+            district_to_borough=district_to_borough,
+            rng=rng,
+            borough_swd_fractions=borough_swd_fractions,
+            priority_config=priority_config
+        )
 
     school_overrides = priority_config.get("school_overrides", {})
     if not school_overrides:
@@ -443,6 +453,7 @@ def run_nyc_priority_matching(
     school_lotteries: np.ndarray,
     rng: np.random.Generator,
     log_file: Optional[str] = None,
+    student_attrs=None
 ) -> np.ndarray:
     """
     NYC priority matching entry point, accepting exactly what em.py already produces.
@@ -499,6 +510,7 @@ def run_nyc_priority_matching(
         district_to_borough=district_to_borough,
         school_lotteries=school_lotteries,
         rng=rng,
+        student_attrs=student_attrs
     )
 
     matches_virtual = gale_shapley_per_school_numba_wrapper(
