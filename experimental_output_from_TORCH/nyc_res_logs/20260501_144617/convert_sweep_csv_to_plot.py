@@ -285,3 +285,32 @@ for d in [f'{i}' for i in range(1, 11)]:
     sub = l_stats[(l_stats['list_length_min'] == min_len_max) & (l_stats['lottery_decile'] == d)]
     if not sub.empty:
         print(f"    D{d}: {sub['avg_rank'].values[0]:.2f}")
+
+# ── Write plot-ready CSVs ─────────────────────────────────────────────────
+fig6 = b_matched[['borough', 'list_length_min', 'pct_matched']].merge(
+    b_stats[['borough', 'list_length_min', 'top_p_pct', 'avg_rank']],
+    on=['borough', 'list_length_min'], how='outer'
+).merge(
+    df[['list_length_min', 'pct_matched', 'avg_rank']].rename(
+        columns={'pct_matched': 'overall_pct_matched', 'avg_rank': 'overall_avg_rank'}),
+    on='list_length_min', how='left'
+).merge(
+    overall_top3.rename(columns={'top_p_pct': 'overall_top3_pct'}),
+    on='list_length_min', how='left'
+)
+fig6.to_csv('fig6_plot_data.csv', index=False)
+print("Saved: fig6_plot_data.csv")
+
+fig7 = l_matched[['lottery_decile', 'list_length_min', 'pct_matched']].merge(
+    l_stats[['lottery_decile', 'list_length_min', 'top_p_pct', 'avg_rank']],
+    on=['lottery_decile', 'list_length_min'], how='outer'
+).merge(
+    df[['list_length_min', 'pct_matched', 'avg_rank']].rename(
+        columns={'pct_matched': 'overall_pct_matched', 'avg_rank': 'overall_avg_rank'}),
+    on='list_length_min', how='left'
+).merge(
+    overall_top3.rename(columns={'top_p_pct': 'overall_top3_pct'}),
+    on='list_length_min', how='left'
+)
+fig7.to_csv('fig7_plot_data.csv', index=False)
+print("Saved: fig7_plot_data.csv")

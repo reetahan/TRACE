@@ -137,6 +137,16 @@ def main():
     print(f"  Overall MAE:                 {overall_mae:.2f}%")
     print(f"──────────────────────────────────────────────\n")
 
+    util_df = pd.DataFrame({
+        'district': districts,
+        'obs_util': obs_means,
+        'sim_util': sim_means,
+        'diff_util': diffs,
+        'abs_diff_util': [abs(d) for d in diffs],
+    })
+    util_csv = args.output.replace('.png', '_district_util.csv')
+    util_df.to_csv(util_csv, index=False)
+    print(f"Saved: {util_csv}")
 
     x = np.arange(len(districts))
     fig1, ax1 = plt.subplots(figsize=(11, 4))
@@ -147,6 +157,7 @@ def main():
     ax1.set_xticklabels(labels)
     plt.setp(ax1.get_xticklabels(), rotation=0, ha='center', fontsize=FONT_SIZE)
     ax1.set_ylabel('Average School Utilization (%)', fontsize=FONT_SIZE)
+    ax1.set_xlabel("Residential District", fontsize=FONT_SIZE)
     ax1.legend(fontsize=LEGEND_FONT_SIZE, loc='upper center', bbox_to_anchor=(0.5, 1.12),
           ncol=2, borderaxespad=0)
     ax1.set_ylim(0, 105)

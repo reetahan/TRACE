@@ -12,7 +12,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from pathlib import Path
-from constants import CHILE_PROVINCE_TO_REGION_MAPPING
+from constants import CHILE_PROVINCE_TO_REGION_MAPPING, CHILE_REGION_TO_ROMAN, ROMAN_ORDER
 
 METRICS = ['top3', 'top5', 'top10', 'unmatched']
 METRIC_LABELS = {
@@ -23,11 +23,10 @@ METRIC_LABELS = {
 }
 
 OBS_COLOR  = "#0a17d1"
-SIM_COLOR  = "#19d308"
-FONT_SIZE  = 10
-LEGEND_FONT_SIZE = 8
-CHILE_REGION_LABEL_SIZE = 8
-CHILE_ROTATION = 45
+SIM_COLOR  = "#c47806"
+FONT_SIZE  = 13
+LEGEND_FONT_SIZE = 11
+CHILE_REGION_LABEL_SIZE = 11
 BAR_WIDTH  = 0.38
 
 def aggregate_scalar_to_region(block, province_to_region, province_students):
@@ -188,8 +187,15 @@ def savefig(fig, path):
 
 def plot_metric(best_block, metric_idx, metric_key, out_path, mode='nyc'):
     districts = sorted(best_block.keys())
+    xlabel = "Residential District"
     if(mode == 'nyc'):
         districts = sorted(best_block.keys(), key=lambda d: int(d) if d.isdigit() else d)
+    else:
+        xlabel = "Region"
+        districts = sorted(
+            best_block.keys(),
+            key=lambda d: ROMAN_ORDER.get(CHILE_REGION_TO_ROMAN.get(str(d), ''), 99)
+        )
     obs_vals  = [best_block[d]['obs'][metric_idx] for d in districts]
     sim_vals  = [best_block[d]['sim'][metric_idx] for d in districts]
 
@@ -204,19 +210,21 @@ def plot_metric(best_block, metric_idx, metric_key, out_path, mode='nyc'):
 
     ax.set_xticks(x)
     if mode == 'chile':
-        labels = [re.sub(r'^de[l]?\s+', '', str(d).replace("Región", "").strip()) for d in districts]
-        plt.setp(ax.get_xticklabels(), rotation=CHILE_ROTATION, ha='right', fontsize=CHILE_REGION_LABEL_SIZE)
+        labels = [CHILE_REGION_TO_ROMAN.get(str(d), str(d)) for d in districts]
+        plt.setp(ax.get_xticklabels(),  ha='center', fontsize=CHILE_REGION_LABEL_SIZE)
     else:
         labels = [str(d) for d in districts]
-        plt.setp(ax.get_xticklabels(), rotation=0, ha='center', fontsize=FONT_SIZE)
+        plt.setp(ax.get_xticklabels(),  ha='center', fontsize=FONT_SIZE)
     ax.set_xticklabels(labels)
+    ax.set_xlabel(xlabel, fontsize=FONT_SIZE) 
     ax.set_ylabel(get_metric_label(metric_key), fontsize=FONT_SIZE)
-    ax.legend(fontsize=LEGEND_FONT_SIZE, loc='upper right')
+    ax.legend(fontsize=LEGEND_FONT_SIZE, loc='upper center', bbox_to_anchor=(0.5, 1.12),
+          ncol=2, borderaxespad=0)
     ax.set_ylim(0, 105)
     ax.set_axisbelow(True)
     ax.tick_params(axis='y', labelsize=FONT_SIZE)
 
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 1, 0.93])
     savefig(fig, out_path)
 
 
@@ -232,8 +240,10 @@ def plot_utilization_by_district(best_util, out_path, mode='nyc'):
         district_sim.setdefault(d, []).append(vals['sim'])
 
     districts = sorted(set(district_obs) | set(district_sim))
+    xlabel = "Region"
     if(mode == 'nyc'):
         districts = sorted(best_block.keys(), key=lambda d: int(d) if d.isdigit() else d)
+        xlabel = "Residential District"
     obs_means = [np.mean(district_obs.get(d, [np.nan])) for d in districts]
     sim_means = [np.mean(district_sim.get(d, [np.nan])) for d in districts]
 
@@ -248,20 +258,21 @@ def plot_utilization_by_district(best_util, out_path, mode='nyc'):
     ax.set_xticks(x)
     if mode == 'chile':
         labels = [re.sub(r'^de[l]?\s+', '', str(d).replace("Región", "").strip()) for d in districts]
-        plt.setp(ax.get_xticklabels(), rotation=CHILE_ROTATION, ha='right', fontsize=CHILE_REGION_LABEL_SIZE)
+        plt.setp(ax.get_xticklabels(), ha='right', fontsize=CHILE_REGION_LABEL_SIZE)
     else:
         labels = [str(d) for d in districts]
-        plt.setp(ax.get_xticklabels(), rotation=0, ha='center', fontsize=FONT_SIZE)
+        plt.setp(ax.get_xticklabels(),  ha='center', fontsize=FONT_SIZE)
     print(districts)
-    ax.set_xlabel('District (inferred from school DBN)', fontsize=FONT_SIZE)
+    ax.set_xlabel(xlabel, fontsize=FONT_SIZE)
     ax.set_xticklabels(labels)
     ax.set_ylabel('Average School Utilization (%)', fontsize=FONT_SIZE)
-    ax.legend(fontsize=LEGEND_FONT_SIZE, loc='upper right')
+    ax.legend(fontsize=LEGEND_FONT_SIZE, loc='upper center', bbox_to_anchor=(0.5, 1.12),
+          ncol=2, borderaxespad=0)
     ax.set_ylim(0, 105)
     ax.set_axisbelow(True)
     ax.tick_params(axis='y', labelsize=FONT_SIZE)
 
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 1, 0.93])
     savefig(fig, out_path)
 
 
@@ -270,7 +281,10 @@ def plot_dist_util(dist_util, out_path, mode='nyc'):
     if mode == 'nyc':
         districts = sorted(dist_util.keys(), key=lambda d: int(d) if str(d).isdigit() else d)
     else:
-        districts = sorted(dist_util.keys(), key=str)
+        districts = sorted(
+            dist_util.keys(),
+            key=lambda d: ROMAN_ORDER.get(CHILE_REGION_TO_ROMAN.get(str(d), ''), 99)
+        )
     obs_means = [dist_util[d]['obs'] for d in districts]
     sim_means = [dist_util[d]['sim'] for d in districts]
     x = np.arange(len(districts))
@@ -280,18 +294,19 @@ def plot_dist_util(dist_util, out_path, mode='nyc'):
 
     ax.set_xticks(x)
     if mode == 'chile':
-        labels = [re.sub(r'^de[l]?\s+', '', str(d).replace("Región", "").strip()) for d in districts]
-        plt.setp(ax.get_xticklabels(), rotation=CHILE_ROTATION, ha='right', fontsize=CHILE_REGION_LABEL_SIZE)
+        labels = [CHILE_REGION_TO_ROMAN.get(str(d), str(d)) for d in districts]
+        plt.setp(ax.get_xticklabels(),  ha='center', fontsize=CHILE_REGION_LABEL_SIZE)
     else:
         labels = [str(d) for d in districts]
-        plt.setp(ax.get_xticklabels(), rotation=0, ha='center', fontsize=FONT_SIZE)
+        plt.setp(ax.get_xticklabels(),  ha='center', fontsize=FONT_SIZE)
 
     ax.set_xticklabels(labels)
     ax.set_ylabel('Average School Utilization (%)', fontsize=FONT_SIZE)
-    ax.legend(fontsize=LEGEND_FONT_SIZE, loc='upper right')
+    ax.legend(fontsize=LEGEND_FONT_SIZE, loc='upper center', bbox_to_anchor=(0.5, 1.12),
+          ncol=2, borderaxespad=0)
     ax.set_ylim(0, 105)
     ax.set_axisbelow(True)
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 1, 0.93])
     savefig(fig, out_path)
 
 
@@ -309,6 +324,8 @@ if __name__ == '__main__':
 
     print(f"Parsing {args.log} ...")
     best_ll, best_block, best_util, best_mae_util, min_mae_util, best_dist_util = parse_log(args.log)
+
+    
 
     if best_block:
         sample_vals = next(iter(best_block.values()))
@@ -388,6 +405,26 @@ if __name__ == '__main__':
         raise SystemExit(1)
 
     # Individual metric plots
+
+    block_rows = []
+    for d, vals in best_block.items():
+        n_stats = len(vals['obs'])
+        metrics_here = [f'top{p}' for p in range(1, n_stats)] + ['unmatched']
+        row = {'district': d}
+        for i, m in enumerate(metrics_here):
+            row[f'obs_{m}'] = vals['obs'][i]
+            row[f'sim_{m}'] = vals['sim'][i]
+            row[f'diff_{m}'] = vals['obs'][i] - vals['sim'][i]
+        block_rows.append(row)
+    pd.DataFrame(block_rows).to_csv(out_dir / f'{args.mode}_val_district_fit_1.csv', index=False)
+    print(f"Saved: {args.mode}_val_district_fit_1.csv")
+
+    if best_dist_util:
+        util_rows = [{'district': d, 'obs_util': v['obs'], 'sim_util': v['sim'],
+                      'diff_util': v['obs'] - v['sim']} for d, v in best_dist_util.items()]
+        pd.DataFrame(util_rows).to_csv(out_dir / f'{args.mode}_val_district_util_1.csv', index=False)
+        print(f"Saved: {args.mode}_val_district_util_1.csv")
+        
     n_stats = len(next(iter(best_block.values()))['obs'])
     if n_stats == 4:
         metrics = ['top3', 'top5', 'top10', 'unmatched']

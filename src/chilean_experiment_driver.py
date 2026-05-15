@@ -37,6 +37,11 @@ def run_chilean_data_experiment(
     indv_df = read_data(f"{CHILEAN_DATA_DIR}/{CHILEAN_INDV_PREF_PROVINCE_FILEPATH }")
     match_df = read_data(f"{CHILEAN_DATA_DIR}/{CHILEAN_MATCH_OUTCOME_PROVINCE_FILEPATH}")
     school_cap_df = read_data(f"{CHILEAN_DATA_DIR}/{CHILEAN_SCHOOL_CAPACITY_BY_REGION_PROVINCE_FILEPATH}")
+    
+    indv_df = read_data(f"{CHILEAN_DATA_DIR}/individual_level_preferences_and_result_santiago_macrozones (1).xlsx")
+    match_df = read_data(f"{CHILEAN_DATA_DIR}/matching_outcome_by_subdivision_santiago_macrozones (1).xlsx")
+    school_cap_df = read_data(f"{CHILEAN_DATA_DIR}/school_capacity_with_region_and_santiago_macrozones (1).xlsx")
+
 
     chile_config_path = f"{CHILEAN_DATA_DIR}/{CHILE_CONFIG_FILEPATH}"
     priority_config = None

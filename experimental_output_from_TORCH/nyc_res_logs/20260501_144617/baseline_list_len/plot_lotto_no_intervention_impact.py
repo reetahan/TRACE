@@ -39,7 +39,7 @@ def compute_decile_metrics(df: pd.DataFrame) -> pd.DataFrame:
 def main():
 
     df = pd.read_csv("min_len_1/student_level.csv")
-    output = "min_len_1/lottery_distributions.png"
+    output = "nyc_lottery_distributions.png"
 
     # Validate required columns
     required = {'matched', 'match_rank', 'lottery_decile'}
@@ -53,6 +53,11 @@ def main():
 
     metrics = compute_decile_metrics(df)
     print(metrics.to_string(index=False))
+
+    metrics_out = metrics.copy()
+    metrics_out['pct_matched'] = 100.0 - metrics_out['pct_unmatched']
+    metrics_out.to_csv(output.replace('.png', '_decile_metrics.csv'), index=False)
+    print(f"Saved: {output.replace('.png', '_decile_metrics.csv')}")
 
     overall_match_rate = 100.0 * df['matched'].mean()
     d1 = metrics[metrics['decile'] == 'D1']['top5_pct'].values[0]
@@ -89,6 +94,7 @@ def main():
 
     ax1.set_xticks(x)
     ax1.set_xticklabels([d.replace('D', '') for d in DECILE_LABELS], fontsize=FONT)
+    ax1.set_xlabel('Lottery Decile', fontsize=FONT)
     ax1.set_ylabel('Match Rate (%)', fontsize=FONT)
     ax2.set_ylabel('Average Rank', fontsize=FONT)
     ax1.tick_params(axis='both', labelsize=FONT)
@@ -99,14 +105,13 @@ def main():
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2,
-               fontsize=LEGEND_FONT, loc='upper center', bbox_to_anchor=(0.5, 1.15),
+               fontsize=LEGEND_FONT, loc='upper center', bbox_to_anchor=(0.5, 1.28),
           ncol=2, borderaxespad=0)
     
 
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0.05, 1, 0.85])
     fig.savefig(output, dpi=200, bbox_inches='tight')
     plt.close(fig)
-    print(f"Saved: {output}")
 
 
 if __name__ == '__main__':
