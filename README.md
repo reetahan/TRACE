@@ -17,7 +17,7 @@ TRACE operates in two stages.
 
 **1. Preference Inference**
 
-Given aggregate statistics about student applications and match outcomes — such as the fraction of students from each residential district matched to their top-3 or top-5 schools — TRACE fits a K-component Mallows mixture model via an EM algorithm.
+Given aggregate statistics about student applications and match outcomes, such as the fraction of students from each residential district matched to their top-3 or top-5 schools, TRACE fits a K-component Mallows mixture model via an EM algorithm.
 
 Each component of the mixture is defined by a central ranking $\sigma_d$ (a district-level ordering of schools, initialized by revealed preference signals in the aggregate data) and a dispersion parameter $\phi_k \in (0, 1]$ (where $\phi_k$ close to 1 indicates strong concentration around the central ranking). Mixture weights are initialized uniformly.
 
@@ -31,7 +31,7 @@ Individual submitted list lengths are modeled either from the empirical distribu
 
 Given fitted parameters, TRACE samples synthetic preference lists, assigns priority attributes and lottery tie-breaking scores, runs Deferred Acceptance under one or more policy configurations, and computes welfare metrics stratified by residential district, borough, or demographic subgroup.
 
-To faithfully represent complex priority systems — including multiple reserve pools, heterogeneous admission methods, and intersecting eligibility categories — TRACE expands each school program into a set of virtual programs, one per seat pool and admission sub-group. Student priority attributes are sampled from distributions calibrated to the observed priority configuration. Each student–program pair is then assigned a composite priority score from reserve bucket, priority tier, and lottery tie-breaker components, and Deferred Acceptance is run over virtual programs before mapping results back to parent programs for welfare evaluation.
+To faithfully represent complex priority systems including multiple reserve pools, heterogeneous admission methods, and intersecting eligibility categories, TRACE expands each school program into a set of virtual programs, one per seat pool and admission sub-group. Student priority attributes are sampled from distributions calibrated to the observed priority configuration. Each student–program pair is then assigned a composite priority score from reserve bucket, priority tier, and lottery tie-breaker components, and Deferred Acceptance is run over virtual programs before mapping results back to parent programs for welfare evaluation.
 
 Welfare metrics reported by TRACE include rank distributions, top-p match rates (the fraction of students matched to one of their top-p choices), unmatched rates, and school utilization, all stratified by subgroup.
 
