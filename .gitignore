@@ -8,6 +8,7 @@
 *.json
 *.pkl
 *.png
+!figures/trace_architecture.png
 *.out
 *.xlsx
 *.env
