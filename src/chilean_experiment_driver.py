@@ -60,7 +60,7 @@ def run_chilean_data_experiment(
     log_and_print(f'Match stats sample:\n{match_stats_df.head()}', outfile)
 
     log_and_print(f"======== Data Loading and Preprocessing Complete =========", outfile)
-    log_and_print(f"Parameters:\nMax_iter: {max_iter}\nM: {M}\nK: {K}\nSeed: {seed}\n \
+    log_and_print(f"Parameters:\nMax_iter: {max_iter}\nM: {M}\nK: {K}\n Max-P: {max_p}\nSeed: {seed}\n \
                   Profile Timing: {profile_timing}\nNum Sampling Jobs: {sampling_n_jobs}\n \
                 List Length Params: {list_length_params}\nSave Parameters: {save_best_params}\n \
                 Save Sample of Best Rankings: {save_best_sample}\nLength of main DF: {len(df)} \
