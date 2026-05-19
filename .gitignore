@@ -20,4 +20,4 @@
 .Renviron
 .Rproj
 outputs/
-*scripts/
+scripts/
