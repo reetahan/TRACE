@@ -19,11 +19,11 @@ TRACE operates in two stages.
 
 Given aggregate statistics about student applications and match outcomes, such as the fraction of students from each residential district matched to their top-3 or top-5 schools, TRACE fits a K-component Mallows mixture model via an EM algorithm.
 
-Each component of the mixture is defined by a central ranking $\sigma_d$ (a district-level ordering of schools, initialized by revealed preference signals in the aggregate data) and a dispersion parameter $\phi_k \in (0, 1]$ (where $\phi_k$ close to 1 indicates strong concentration around the central ranking). Mixture weights are initialized uniformly.
+Each component of the mixture is defined by a central ranking $\sigma_d$ (a district-level ordering of schools, initialized by revealed preference signals in the aggregate data) and a dispersion parameter $\phi_k \in (0, 1]$ (where $\phi_k$ close to 0 indicates strong concentration around the central ranking). Mixture weights are initialized uniformly.
 
 The EM alternates between:
 - **E-step**: sampling synthetic preference lists from the current model and running Deferred Acceptance to produce simulated aggregate statistics
-- **M-step**: updating the dispersion parameters $\phi_k$ via gradient ascent to reduce the gap between observed and simulated statistics
+- **M-step**: updating the dispersion parameters $\phi_k$ via coordinate descent to reduce the gap between observed and simulated statistics
 
 Individual submitted list lengths are modeled either from the empirical distribution (when available) or from a clipped Gaussian parameterized by summary statistics. Once a list length $L_i$ is drawn, the full Mallows ranking is truncated to its top $L_i$ entries to form the submitted preference list. Fitted parameters are saved for downstream use.
 
@@ -127,4 +127,4 @@ Python 3.8+ with `numpy`, `pandas`, `scipy`, and `matplotlib`. The data preproce
 | | **Model fit** | | |
 | Log-likelihood | | −13,344.96 | |
 | MAE, top-3 match rate | | 6.6 pp | |
-| MAE, program utilization | | 11.0% | |
+| MAE, program utilization | | 5.4% | |
