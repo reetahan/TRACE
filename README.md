@@ -39,7 +39,7 @@ Welfare metrics reported by TRACE include rank distributions, top-p match rates 
 
 ## Core Files
 
-These files implement the general-purpose framework and execute in roughly this order:
+These files implement the general purpose framework and execute in roughly this order:
 
 | File | Role |
 |---|---|
