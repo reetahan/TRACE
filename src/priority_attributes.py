@@ -1,4 +1,3 @@
-
 import numpy as np
 
 
@@ -226,7 +225,32 @@ def build_composite_rank_matrix(
             if group in ("all", "all_nyc"):
                 break
 
-            if group == "borough" and prog_borough is not None:
+            # School-independent groups that appear in priority_tiers (rather than reserves).
+            # The primary case is 'disadvantaged', used in Chile-style systems where
+            # priority_student is a tier, not a reserved seat.
+            if group == "disadvantaged":
+                matched = (~assigned) & a_disadv
+                priority_tier[matched] = t["tier"]
+                assigned[matched] = True
+            elif group == "SWD":
+                matched = (~assigned) & a_SWD
+                priority_tier[matched] = t["tier"]
+                assigned[matched] = True
+            elif group == "DIA":
+                matched = (~assigned) & a_DIA
+                priority_tier[matched] = t["tier"]
+                assigned[matched] = True
+            elif group == "special_needs":
+                matched = (~assigned) & a_sn
+                priority_tier[matched] = t["tier"]
+                assigned[matched] = True
+            elif group in ("high_performance", "academic_excellence"):
+                matched = (~assigned) & a_hp
+                priority_tier[matched] = t["tier"]
+                assigned[matched] = True
+
+            # School-dependent groups: priority only applies at a specific school.
+            elif group == "borough" and prog_borough is not None:
                 matched = (~assigned) & (a_borough == prog_borough)
                 priority_tier[matched] = t["tier"]
                 assigned[matched] = True

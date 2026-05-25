@@ -37,47 +37,177 @@ Welfare metrics reported by TRACE include rank distributions, top-p match rates 
 
 ---
 
-## Core Files
+## Quickstart
 
-These files implement the general-purpose framework and execute in roughly this order:
+TRACE exposes a single `TRACE` class in `src/trace.py`. Three modes are supported, auto-detected from the inputs provided.
+
+### Mode 1 — Full EM pipeline (aggregate data)
+
+```python
+from trace import TRACE
+from types import EvaluateConfig
+
+model = TRACE(
+    final_aggregates_fpath  = "data/agg_app_stats.csv",
+    matching_data_fpath     = "data/match_stats.csv",
+    school_data_fpath       = "data/school_info.csv",
+    priority_config_fpath   = "data/priority_config.json",
+)
+model.preprocess()   # calls preprocess_data() in data_ingestion.py
+model.fit(K=6, M=15, max_iter=20, n_jobs=32, seed=40,
+          list_length_params={"list_length_mode": "gaussian",
+                              "list_length_mean": 7, "list_length_std": 2,
+                              "list_length_min": 1})
+results = model.evaluate(config=EvaluateConfig(
+    max_p=10,
+    stratify_by=["subdivision"],
+    output_dir="output/welfare",
+))
+print(f"Avg rank: {results.rank_stats['avg_rank']:.3f}")
+print(f"Pct matched: {results.rank_stats['pct_matched']:.1f}%")
+```
+
+### Mode 2 — Sampling from pre-fitted parameters
+
+```python
+model = TRACE(
+    mallows_params_fpath  = "output/run_params.pkl",
+    matching_data_fpath   = "data/match_stats.csv",
+    school_data_fpath     = "data/school_info.csv",
+    priority_config_fpath = "data/priority_config.json",
+)
+model.set_list_length_params({"list_length_mode": "gaussian",
+                              "list_length_mean": 7, "list_length_std": 2,
+                              "list_length_min": 1})
+model.sample()
+model.run_matching(seed=42)
+results = model.evaluate(config=EvaluateConfig(stratify_by=["subdivision"]))
+```
+
+### Mode 3 — Raw individual preferences
+
+```python
+model = TRACE(
+    individual_data_fpath = "data/individual_prefs.csv",
+    school_data_fpath     = "data/school_info.csv",
+    priority_config_fpath = "data/priority_config.json",
+)
+# individual_data_fpath: long format, one row per (student_id, school_id, preference_number)
+# Priority attribute columns (e.g. priority_sibling, priority_student) and
+# stratification attributes (e.g. female) are carried through automatically.
+model.run_matching(
+    priority_attribute_cols=["priority_sibling", "priority_student"],
+    student_attribute_cols=["female"],
+    seed=42,
+)
+results = model.evaluate(config=EvaluateConfig(stratify_by=["subdivision", "female"]))
+```
+
+### List length sweep
+
+```python
+from types import EvaluateConfig, Metric
+
+sweep = model.evaluate(
+    metrics=[Metric.LIST_LENGTH_SWEEP],
+    config=EvaluateConfig(
+        sweep_min_lengths=list(range(1, 11)),
+        n_stb_runs=10,
+        stratify_by=["subdivision"],
+    ),
+)
+print(sweep.summary())   # DataFrame: min_len, avg_rank_mean/std, pct_matched_mean/std
+```
+
+---
+
+## Adapting TRACE to a New System
+
+**1. Implement `preprocess_data` in `data_ingestion.py`**
+
+```python
+def preprocess_data(final_agg_df, match_stats_df, school_df, addtl_df=None):
+    # Transform your raw data into the format em.py expects and return the three DataFrames.
+    # NYC and Chile reference implementations: nyc_preprocess_data(), preprocess_chilean_data()
+    ...
+    return final_agg_df, match_stats_df, school_df
+```
+
+The three returned DataFrames must have these columns:
+
+| DataFrame | Required columns |
+|---|---|
+| `final_agg_df` | `School DBN`, `Residential District`, `Total Applicants by Residential District`, `True Applicants by Residential District`, `Ratio`, `Rank` |
+| `school_df` | `School DBN`, `Capacity`, `Utilization` |
+| `match_stats_df` | `Residential District`, `Total Applicants`, `% Matches to Choice 1-{k}` (one per k), `Unmatched` |
+
+**2. Write a priority config JSON**
+
+```json
+{
+  "__meta__": { "system_name": "MyCity" },
+  "system_defaults": {
+    "student_attribute_fractions": {
+      "disadvantaged": 0.45,
+      "sibling": 0.12
+    },
+    "priority_tiers": [
+      { "group": "disadvantaged", "tier": 1, "school_dependent": false },
+      { "group": "sibling",       "tier": 2, "school_dependent": true  },
+      { "group": "all",           "tier": 3 }
+    ]
+  },
+  "school_overrides": {
+    "SCHOOL_ID": {
+      "reserves": { "SWD": 0.20 }
+    }
+  }
+}
+```
+
+Use `TRACE.validate_priority_config(config)` to check for schema issues before running.
+
+If no priority config is provided, TRACE uses plain single tie-breaking Gale-Shapley.
+
+---
+
+## Core Files
 
 | File | Role |
 |---|---|
-| `src/data_ingestion.py` | Loads and preprocesses aggregate application and match data |
+| `src/trace.py` | **TRACE API** — main entry point for all three modes |
+| `src/types.py` | Shared types: `DataKey`, `Metric`, `EvaluateConfig`, `MatchOutcomes`, `SweepResults` |
+| `src/data_ingestion.py` | Data loading and preprocessing; implement `preprocess_data()` here |
+| `src/priority_attributes.py` | Generic priority attribute sampling and composite rank matrix construction |
 | `src/mallows.py` | Mallows model: sampling rankings and computing likelihoods |
 | `src/gale_shapley.py` | Student-proposing Deferred Acceptance with configurable priority rules |
 | `src/em.py` | EM algorithm: fits a Mallows mixture from aggregate statistics |
 | `src/welfare.py` | Computes welfare metrics from simulated match outcomes |
-| `src/list_length.py` | Utilities for list length analysis and augmentation |
-| `src/util.py` | General shared utilities |
+| `src/list_length.py` | List length sampling utilities |
+| `src/util.py` | Shared utilities |
 | `src/constants.py` | Geographic and demographic mappings |
-| `src/file_config.py` | Path configuration |
-| `src/driver.py` | Top-level experiment driver (inference + welfare in one run) |
-| `src/parse_validation.py` | Generates validation plots comparing observed vs. simulated statistics across EM iterations |
-| `src/plot_validation_scatter.py` | Scatter plots of observed vs. simulated match rates for model fit assessment |
-| `src/simulation_validation_analysis.py` | Sensitivity analysis across EM hyperparameters (K, M, iterations) |
-| `src/convert_sweep_csv_to_plot.py` | Plots welfare metrics across a counterfactual parameter sweep |
-| `src/generate_utilization_from_params.py` | School utilization plots from saved fitted parameters |
+| `src/driver.py` | Top-level experiment driver |
 
 ---
 
-## System-Specific Files (NYC and Chile)
+## System-Specific Files
 
-The following files implement the empirical applications from the paper. A user applying TRACE to a new system would write analogous versions for their own setting.
+These files implement the empirical applications from the paper and serve as reference implementations for applying TRACE to a new system.
 
 | File | Role |
 |---|---|
 | `src/nyc_experiment_driver.py` | End-to-end NYC inference run |
 | `src/chilean_experiment_driver.py` | End-to-end Chile inference run |
-| `src/nyc_list_len_welfare.py` | Sweeps minimum list length requirements and evaluates welfare effects |
-| `src/nyc_priority_attributes.py` | NYC priority attribute counterfactuals (geographic, sibling, etc.) |
-| `src/chile_priority_attributes.py` | Chile priority attribute counterfactuals |
-| `src/chilean_real_welfare_comparison.py` | Compares welfare under real vs. synthetic preferences for Chile |
-| `src/plot_lottery_pure_chance.py` | Welfare under a pure lottery (no preference information) as a lower-bound benchmark |
-| `src/DataGeneration/NYC/` | R scripts that process raw NYC DOE data into the format TRACE expects |
-| `src/DataGeneration/Chile/` | R scripts that process raw Chilean SAE data |
+| `src/nyc_list_len_welfare.py` | Sweeps minimum list length requirements for NYC |
+| `src/nyc_priority_attributes.py` | NYC-specific priority matching (virtual programs, borough tiers) |
+| `src/chile_priority_attributes.py` | Chile-specific priority matching |
+| `src/chilean_real_welfare_comparison.py` | Observed vs. synthetic welfare comparison for Chile |
+| `src/plot_lottery_pure_chance.py` | Pure-lottery welfare benchmark |
+| `src/DataGeneration/NYC/` | R scripts for processing raw NYC DOE data |
+| `src/DataGeneration/Chile/` | R scripts for processing raw Chilean SAE data |
 
 ---
+
 
 ## Data Requirements
 

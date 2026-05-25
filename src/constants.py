@@ -11,6 +11,19 @@ DISTRICT_TO_BOROUGH_MAPPING = {
 UTILITY_PENALTY = -0.1
 LEARNING_RATE = 0.1
 
+# pct_top_{k} columns are handled separately in _to_em_dataframes().
+_EM_COLUMN_MAP: dict[str, str] = {
+    'subdivision':       'Residential District',
+    'school_id':         'School DBN',
+    'n_applicants':      'Total Applicants by Residential District',
+    'n_true_applicants': 'True Applicants by Residential District',
+    'ratio':             'Ratio',
+    'rank':              'Rank',
+    'n_students':        'Total Applicants',
+    'capacity':          'Capacity',
+    'utilization':       'Utilization',
+    'pct_unmatched':     'Unmatched',
+}
 
 CHILE_PROVINCE_TO_REGION_MAPPING = {
     'Arica': 'Región de Arica y Parinacota', 'Parinacota': 'Región de Arica y Parinacota', 'Iquique': 'Región de Tarapacá', 

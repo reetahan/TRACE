@@ -3,20 +3,8 @@ import pandas as pd
 import numpy as np
 from util import log_and_print
 
-def preprocess_data(df, match_stats_df, school_info_df, addtl_school_info_df):
-    '''
-    Fill in your custom preprocessing function here. The function should return the following, at
-    the minimum. You may return additional dataframes or have additional columns in your data as needed,
-    but this is what is required to run the experiments:
-
-    1) A DataFrame with columns ['School ID', 'School Name', 'School District', 'Residential District', 
-         'Total Applicants by {Aggregate}', 'Total Applicants School', '{Metric}', 'Rank (sorted by Metric)']
-    2) A DataFrame with columns ['School ID', 'Capacity', 'Utilization'] 
-    3) A DataFrame with columns ['Aggregate', 'Total Applicants (for Aggregate)', '% Matches to Choices 1 to k_1', 
-                                    '% Matches to Choice 1 to k_2', '% Matches to Choice 1 to k_3',
-                                    '% Matches to Choice 1 to k_4']
-    '''
-    pass
+def preprocess_data(df, match_stats_df, school_info_df, addtl_school_info_df=None):
+    return nyc_preprocess_data(df, match_stats_df, school_info_df, addtl_school_info_df)
 
 def read_data(file_path, sheet=0, is_first_row_header=False):
     """
