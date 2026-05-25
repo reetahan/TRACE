@@ -169,6 +169,21 @@ Use `TRACE.validate_priority_config(config)` to check for schema issues before r
 
 If no priority config is provided, TRACE uses plain single tie-breaking Gale-Shapley.
 
+**3. Add custom evaluation functions**
+
+Define any additional evaluation functions in `custom_user_functions.py` and pass them to `evaluate()`:
+
+```python
+from custom_user_functions import my_equity_metric, my_utilization_metric
+
+results = model.evaluate(
+    custom_function_list=[my_equity_metric, my_utilization_metric],
+    config=EvaluateConfig(stratify_by=["subdivision"]),
+)
+```
+
+Each function receives `(MatchOutcomes, EvaluateConfig)` and should return a results dict. Custom functions run alongside the built-in metric suite.
+
 ---
 
 ## Core Files
@@ -258,3 +273,10 @@ Python 3.8+ with `numpy`, `pandas`, `scipy`, and `matplotlib`. The data preproce
 | Log-likelihood | | −13,344.96 | |
 | MAE, top-3 match rate | | 6.6 pp | |
 | MAE, program utilization | | 5.4% | |
+
+
+---
+
+## Version Notes
+
+This is TRACE v1.0. The current release requires users to preprocess their data into a fixed schema before passing it to the API (see `preprocess_data()` in `data_ingestion.py`). A future release may include automated ingestion that handles a wider variety of raw input formats without requiring manual schema alignment.
