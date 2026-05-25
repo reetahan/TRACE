@@ -11,6 +11,7 @@ import pandas as pd
 from types import DataKey, EvaluateConfig, MatchOutcomes, Metric, REQUIRED_COLUMNS, SweepResults
 from welfare import evaluate_simulation_output, WelfareResults
 from constants import *
+from custom_user_functions import *
 
 from em import EM_algorithm, run_single_simulation
 from mallows import sample_students_global_mixture
