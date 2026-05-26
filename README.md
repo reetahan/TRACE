@@ -137,7 +137,7 @@ The three returned DataFrames must have these columns:
 
 | DataFrame | Required columns |
 |---|---|
-| `final_agg_df` | `School DBN`, `Residential District`, `Total Applicants by Residential District`, `True Applicants by Residential District`, `Ratio`, `Rank` |
+| `final_agg_df` | `School DBN`, `Residential District`,  `Rank` |
 | `school_df` | `School DBN`, `Capacity`, `Utilization` |
 | `match_stats_df` | `Residential District`, `Total Applicants`, `% Matches to Choice 1-{k}` (one per k), `Unmatched` |
 
