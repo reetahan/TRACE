@@ -24,38 +24,6 @@ from data_ingestion import preprocess_data
 class TRACE:
     """
     School-assignment welfare simulation API.
-
-    Mode 1  full EM pipeline
-            Inputs: final_aggregates_fpath (aggregate ratio stats per subdivision×school),
-                    match_stats_fpath (observed top-p match rates per subdivision),
-                    school_data_fpath
-            Workflow: preprocess() → fit() → sample() → run_matching() → evaluate()
-
-    Mode 2  sampling from pre-fitted parameters
-            Inputs: mallows_params_fpath
-            Workflow: sample() → run_matching() → evaluate()
-
-    Mode 3  raw individual preferences
-            Inputs: individual_data_fpath (long format: one row per student×preference),
-                    school_data_fpath
-            Workflow: run_matching() → evaluate()
-            TRACE reconstructs preference lists from the long-format data, reads
-            priority flags directly from the observed columns (no sampling needed),
-            runs DA, and computes match rank.
-            Long-format columns: student_id, school_id, preference_number (required);
-            subdivision, binary priority flags, and any stratification attributes
-            (e.g. female) are optional but used when present.
-
-    DataFrame slots:
-      _final_agg_df   aggregate application stats, one row per (subdivision × school) —
-                      em.py's 'df' argument (Mode 1)
-      _match_stats_df observed top-p match outcome rates, one row per subdivision —
-                      em.py's fitting target (Mode 1)
-      _school_df      school list with capacities (Modes 1 and 3)
-      _individual_df  raw individual student preference lists, one row per student (Mode 3)
-
-    fit() and _run_sweep() use plain GS internally regardless of priority_config;
-    priority tiers are applied only in run_matching().
     """
 
     def __init__(
