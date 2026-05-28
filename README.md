@@ -109,21 +109,32 @@ results = model.evaluate(config=EvaluateConfig(stratify_by=["subdivision", "fema
 
 **1. Implement `preprocess_data` in `data_ingestion.py`**
 
+
 ```python
 def preprocess_data(final_agg_df, match_stats_df, school_df, addtl_df=None):
-    # Transform your raw data into the format em.py expects and return the three DataFrames.
-    # NYC and Chile reference implementations: nyc_preprocess_data(), preprocess_chilean_data()
+    # Transform your raw data and return three DataFrames in TRACE generic column format.
+    # See schema table below. Use to_generic() to translate if starting from a
+    # system-specific preprocessor that returns em.py column names.
     ...
     return final_agg_df, match_stats_df, school_df
 ```
+
+Two reference implementations are provided:
+
+| Function | System | Notes |
+|---|---|---|
+| `nyc_preprocess_data(df, match_stats_df, school_info_df, addtl_school_info_df)` | NYC | Splits schools into virtual programs by seat pool, computes Rank from a revealed-preference ratio, normalizes match rates from raw counts |
+| `preprocess_chilean_data(indv_df, match_df, school_cap_df, is_province_level=False)` | Chile | Constructs aggregate application stats from individual-level data, computes Rank via Borda score, aggregates school capacities by program |
+| `to_generic(df)` | Both | Translates em.py internal column names to TRACE generic names; call on any DataFrame returned by the above functions |
 
 The three returned DataFrames must have these columns:
 
 | DataFrame | Required columns |
 |---|---|
-| `final_agg_df` | `School DBN`, `Residential District`,  `Rank` |
-| `school_df` | `School DBN`, `Capacity`, `Utilization` |
-| `match_stats_df` | `Residential District`, `Total Applicants`, `% Matches to Choice 1-{k}` (one per k), `Unmatched` |
+| `final_agg_df` | `school_id`, `subdivision`, `rank` |
+| `school_df` | `school_id`, `capacity`, `utilization` (used for fit diagnostics) |
+| `match_stats_df` | `subdivision`, `n_students`, `pct_top_{k}` (one column per k, e.g. `pct_top_3`), `pct_unmatched` |
+
 
 **2. Write a priority config JSON**
 
@@ -152,6 +163,25 @@ The three returned DataFrames must have these columns:
 Use `TRACE.validate_priority_config(config)` to check for schema issues before running.
 
 If no priority config is provided, TRACE uses plain single tie-breaking Gale-Shapley.
+
+**Built-in evaluation metrics**
+
+Pass any subset to `evaluate(metrics=[...])`. All run by default except `LIST_LENGTH_SWEEP`.
+
+| `Metric` | Description |
+|---|---|
+| `GLOBAL_TOP_P_SWEEP` | Fraction of students matched to one of their top-p choices, for p = 1 to `max_p` |
+| `RANK_DISTRIBUTION` | Full histogram of match ranks across all students |
+| `RANK_STATS` | Overall average rank, rank variance, and % matched |
+| `TOP_P_BY_CATEGORY` | Top-p rates stratified by each column in `stratify_by` |
+| `RANK_DISTRIBUTION_BY_CATEGORY` | Rank histogram per category value |
+| `RANK_STATS_BY_CATEGORY` | Average rank and variance per category value |
+| `RANK_VARIANCE_BY_CATEGORY` | Rank variance (social inequity) per category, as a bar chart |
+| `TOP_P_BY_LIST_LENGTH` | Top-p rates broken down by submitted list length |
+| `AVG_RANK_BY_LIST_LENGTH` | Average rank ± std by submitted list length |
+| `TOP_P_BY_PRIORITY_PERCENTILE` | Top-p rates by priority score percentile bin (requires `priority_col` or `priority_matrix` in `EvaluateConfig`) |
+| `TOP_P_BY_CONJUNCTION` | Top-p rates at intersections of multiple categories (requires `conjunctions` in `EvaluateConfig`) |
+| `LIST_LENGTH_SWEEP` | Counterfactual welfare sweep over minimum list length requirements; runs `n_stb_runs` DA simulations per length value (requires prior `fit()`) |
 
 **3. Add custom evaluation functions**
 
