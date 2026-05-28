@@ -8,7 +8,7 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 
-from types import DataKey, EvaluateConfig, MatchOutcomes, Metric, REQUIRED_COLUMNS, SweepResults
+from types_trace import DataKey, EvaluateConfig, MatchOutcomes, Metric, REQUIRED_COLUMNS, SweepResults
 from welfare import evaluate_simulation_output, WelfareResults
 from constants import *
 from custom_user_functions import *
@@ -777,6 +777,15 @@ class TRACE:
             output_dir=cfg.output_dir,
             n_priority_bins=cfg.n_priority_bins,
             show=cfg.show_plots,
+            compute_by_category=any(
+                m in metrics_to_run for m in {
+                    Metric.TOP_P_BY_CATEGORY, Metric.RANK_DISTRIBUTION_BY_CATEGORY,
+                    Metric.RANK_STATS_BY_CATEGORY, Metric.RANK_VARIANCE_BY_CATEGORY,
+                }
+            ),
+            compute_by_list_length=Metric.TOP_P_BY_LIST_LENGTH in metrics_to_run
+                                   or Metric.AVG_RANK_BY_LIST_LENGTH in metrics_to_run,
+            compute_by_priority=Metric.TOP_P_BY_PRIORITY_PERCENTILE in metrics_to_run,
         )
 
         if custom_function_list:

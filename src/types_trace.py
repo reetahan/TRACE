@@ -48,9 +48,9 @@ class EvaluateConfig:
     priority_matrix: np.ndarray | None  = None
     priority_higher_is_better: bool     = True
     n_priority_bins: int                = 10
-    sweep_min_lengths: list[int]        = field(default_factory=lambda: list(range(1, 16)))
+    sweep_min_lengths: list[int]        = field(default_factory=lambda: list(range(1, 6)))
     sweep_n_jobs: int                   = 1
-    n_stb_runs: int                     = 10
+    n_stb_runs: int                     = 5
 
 
 @dataclass

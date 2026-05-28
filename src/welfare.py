@@ -507,6 +507,9 @@ def evaluate_simulation_output(
     n_priority_bins: int = 10,
     plot_p_values: list[int] | None = None,
     show: bool = False,
+    compute_by_category: bool = True,
+    compute_by_list_length: bool = True,
+    compute_by_priority: bool = True,
 ) -> WelfareResults:
 
     required_keys = {"rankings_as_indices", "matches_idx", "student_attributes"}
@@ -533,18 +536,18 @@ def evaluate_simulation_output(
     rank_dist        = summarize_rank_distribution(student_df, max_p=k)
     rank_dist_by_cat = summarize_rank_distribution_by_category(
         student_df, categories=categories, max_p=k
-    )
+    ) if compute_by_category else {}
 
     # Metric 3 — average rank + variance
     rank_stats_overall = summarize_rank_stats_overall(student_df)
-    rank_stats_by_cat  = summarize_rank_stats_by_category(student_df, categories=categories)
+    rank_stats_by_cat  = summarize_rank_stats_by_category(student_df, categories=categories) if compute_by_category else {}
 
     # Per-dimension sweeps (all metrics embedded as columns)
-    by_length     = summarize_top_p_sweep_by_list_length(student_df, max_p=k)
+    by_length     = summarize_top_p_sweep_by_list_length(student_df, max_p=k) if compute_by_list_length else pd.DataFrame()
     by_priority   = summarize_top_p_sweep_by_priority_percentile(
         student_df, max_p=k, n_bins=n_priority_bins
-    )
-    by_category   = summarize_top_p_sweep_by_category(student_df, categories=categories, max_p=k)
+    ) if compute_by_priority else None
+    by_category   = summarize_top_p_sweep_by_category(student_df, categories=categories, max_p=k) if compute_by_category else {}
     by_conjunction = (
         summarize_top_p_sweep_by_conjunction(student_df, conjunctions, max_p=k)
         if conjunctions else {}
