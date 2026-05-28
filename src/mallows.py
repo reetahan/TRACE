@@ -113,6 +113,7 @@ def sample_students_global_mixture(
     log_progress=False,
     progress_every=5000,
     log_file=None,
+    k_ranking_length=10,
 ):
     """
     Sample students from global mixture with district-specific sigma.
@@ -161,6 +162,7 @@ def sample_students_global_mixture(
                 phis[k],
                 rng=rng,
                 cum_cache_2d=cum_caches[k],
+                k_ranking_length=k_ranking_length
             )
             rankings.append(ranking)
             maybe_log(i)
@@ -181,6 +183,7 @@ def sample_students_global_mixture(
                 phis,
                 chunk,
                 seed,
+                k_ranking_length=k_ranking_length
             )
             future_to_chunk_meta[future] = (chunk_idx, len(chunk))
 

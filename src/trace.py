@@ -36,13 +36,7 @@ class TRACE:
         priority_config_fpath: str | None        = None,
         custom_preprocessing_function: Callable | None = None,
     ):
-        """
-        matching_data_fpath: aggregate match outcome statistics (Mode 1) —
-            the observed top-p rates the EM fits against.
-        custom_preprocessing_function: if provided, called immediately after raw
-            files are loaded. Signature: (dict[DataKey, DataFrame]) -> dict[DataKey, DataFrame].
-            further_processing is set to False (no built-in preprocessing runs after it).
-        """
+
         self._individual_fpath       = individual_data_fpath
         self._school_fpath           = school_data_fpath
         self._match_stats_fpath      = matching_data_fpath
@@ -174,10 +168,6 @@ class TRACE:
     def _to_em_dataframes(self) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """
         Rename generic columns to em.py's internal schema before any pipeline call.
-
-        Returns (final_agg_em, match_stats_em, school_em), which map to
-        em.py's (df, match_stats_df, school_info_df) arguments respectively.
-        Static mappings in _EM_COLUMN_MAP; pct_top_{k} → '% Matches to Choice 1-{k}'.
         """
         if self._final_agg_df is None or self._match_stats_df is None or self._school_df is None:
             raise ValueError("_to_em_dataframes requires final_agg_df, match_stats_df, and school_df.")
@@ -259,9 +249,6 @@ class TRACE:
             )
         self._final_agg_df, self._match_stats_df, self._school_df = result
 
-    # ------------------------------------------------------------------ #
-    # Fit (Mode 3)                                                         #
-    # ------------------------------------------------------------------ #
 
     def fit(
         self,
@@ -281,17 +268,6 @@ class TRACE:
     ) -> TRACE:
         """
         Run EM to infer Mallows mixture parameters from aggregate match statistics (Mode 1).
-
-        Requires _final_agg_df, _match_stats_df, and _school_df.
-
-        subdivision_to_region: optional subdivision → region mapping.
-        list_length_params: stored internally for subsequent sample() calls.
-        custom_matching_fn: override the Gale-Shapley step used inside the EM loop.
-            TODO: run_single_simulation in em.py must accept a matching hook before
-            this is wired through. Accepted here and stored but not yet active.
-
-        After fit(): get_mallows_params() returns best params; _preference_lists and
-        _last_match_outcomes hold the best synthetic sample from the EM run.
         """
         if self.mode != 1:
             raise ValueError("fit() requires Mode 1 (final_aggregates_fpath + match_stats_fpath).")
@@ -304,6 +280,7 @@ class TRACE:
             self._subdivision_to_region = subdivision_to_region
 
         individual_em, match_stats_em, school_em = self._to_em_dataframes()
+        self._custom_matching_fn = custom_matching_fn
 
         experiment_results = EM_algorithm(
             df=individual_em,
@@ -323,6 +300,7 @@ class TRACE:
             save_best_sample=True,
             max_p=max_p,
             profile_timing=verbose,
+            custom_matching_fn=custom_matching_fn
         )
 
         self._fitted_params = experiment_results.params
@@ -360,17 +338,12 @@ class TRACE:
         """
         Sample synthetic preference lists from the Mallows mixture.
 
-        Requires match_stats_df (for per-subdivision student counts).
-        Stores results in _preference_lists and _subdivision_assignments.
-
         list_length_params formats:
           gaussian:                 {list_length_mode, list_length_mean, list_length_std, list_length_min}
           gaussian_per_subdivision: {list_length_mode, mean_per_subdivision: {id: float}, list_length_std, list_length_min}
           empirical:                {list_length_mode, list_length_empirical_probs: {length: prob}}
           fixed:                    {list_length_mode, k_ranking_length}
 
-        Raises ValueError if the implied max list length exceeds 10 (internal cap in
-        sample_students_global_mixture). Use fit() for list lengths above 10.
         """
         params = mallows_params or self._fitted_params or self._mallows_params
         if params is None:
@@ -382,12 +355,6 @@ class TRACE:
         if lp is None:
             raise ValueError("No list_length_params. Call set_list_length_params() or pass directly.")
 
-        mallows_k = self._compute_mallows_k(lp, params)
-        if mallows_k > 10:
-            raise ValueError(
-                f"list_length_params implies max list length {mallows_k}, but "
-                "sample_students_global_mixture caps at 10. Use fit() for longer lists."
-            )
 
         rng = np.random.default_rng(seed)
         all_rankings: list[list[str]]  = []
@@ -406,6 +373,7 @@ class TRACE:
                 n_students=n_students,
                 n_jobs=n_jobs,
                 random_seed=int(rng.integers(2**32)),
+                k_ranking_length=self._compute_mallows_k(lp, params)
             )
 
             effective_lp = lp
@@ -479,19 +447,7 @@ class TRACE:
         student_attribute_cols: list[str] | None   = None,
     ) -> MatchOutcomes:
         """
-        Run Deferred Acceptance on the given (or stored) preference lists.
-
-        In Mode 3, if preference_lists is not provided, they are extracted
-        automatically from _individual_df via _extract_individual_data().
-        priority_attribute_cols names columns in _individual_df whose values are
-        observed binary priority flags; these are used directly rather than sampled.
-        student_attribute_cols names additional per-student columns to carry into
-        MatchOutcomes.student_attributes (e.g. 'female').
-
-        Dispatches on priority_config.__meta__.system_name:
-          '' (empty) — plain STB Gale-Shapley
-          any other  — priority-aware matching via priority_attributes.py
-                       (or observed attributes if priority_attribute_cols provided)
+        Run matching on the given (or stored) preference lists.
         """
         lists        = preference_lists
         subdivisions = subdivision_assignments
@@ -545,9 +501,6 @@ class TRACE:
               priority flags from the raw data are treated as school-independent (applied
               at all schools), since we do not know which specific school each flag
               corresponds to.
-
-        school_lotteries are generated once and serve as the within-tier tiebreaker for
-        both the plain GS path and the priority path.
         """
         if self._school_df is None:
             raise ValueError("Matching requires school_df.")
@@ -642,16 +595,8 @@ class TRACE:
         assignments, and a student attributes DataFrame.
 
         Long-format input: one row per (student_id, school_id, preference_number).
-        Optional columns carried through:
-          subdivision             — used as subdivision_assignments
-          priority attribute cols — binary flags that match priority_config.priority_tiers
-                                    group names; passed directly to run_matching() instead
-                                    of sampling from fractions
-          student attribute cols  — any other per-student columns to carry into
-                                    MatchOutcomes.student_attributes (e.g. 'female')
 
         Returns (preference_lists, subdivision_assignments, student_attrs_df).
-        preference_lists is ordered by student_id (sorted ascending).
         """
         if self._individual_df is None:
             raise ValueError("_extract_individual_data requires individual_df (Mode 3).")
@@ -778,8 +723,6 @@ class TRACE:
         custom_function_list: list of user-defined evaluation functions to run in
             addition to (or instead of) built-in metrics. Each receives (MatchOutcomes,
             EvaluateConfig) and returns a result dict.
-            TODO: custom function execution not yet wired; results are currently ignored.
-            Convention: define custom functions in custom_user_functions.py and import.
         config: EvaluateConfig controlling max_p, stratification, output paths, sweep params.
         match_outcomes: override the stored _last_match_outcomes.
         """
@@ -807,7 +750,7 @@ class TRACE:
         if Metric.LIST_LENGTH_SWEEP in metrics_to_run:
             return self._run_sweep(cfg)
 
-        return evaluate_simulation_output(
+        results = evaluate_simulation_output(
             sim_output={
                 'rankings_as_indices': outcomes.rankings_as_indices,
                 'matches_idx':         outcomes.matches_idx,
@@ -823,6 +766,14 @@ class TRACE:
             n_priority_bins=cfg.n_priority_bins,
             show=cfg.show_plots,
         )
+
+        if custom_function_list:
+            results.custom_results = {
+                fn.__name__: fn(outcomes, cfg)
+                for fn in custom_function_list
+            }
+            
+        return results
 
     def _run_sweep(self, config: EvaluateConfig) -> SweepResults:
         """
@@ -879,6 +830,7 @@ class TRACE:
                     list_length_params=lp_sweep_em,
                     save_best_sample=True,
                     max_p=config.max_p,
+                    custom_matching_fn=self._custom_matching_fn
                 )
 
                 attr_df = (

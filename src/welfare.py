@@ -23,6 +23,7 @@ class WelfareResults:
     top_p_sweep_by_category: dict[str, pd.DataFrame]
     top_p_sweep_by_conjunction: dict[tuple[str, ...], pd.DataFrame]
     saved_paths: dict[str, str] | None = None
+    custom_results: dict[str, Any] | None = None
 
 # Internal helpers
 

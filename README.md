@@ -103,22 +103,6 @@ model.run_matching(
 results = model.evaluate(config=EvaluateConfig(stratify_by=["subdivision", "female"]))
 ```
 
-### List length sweep
-
-```python
-from types import EvaluateConfig, Metric
-
-sweep = model.evaluate(
-    metrics=[Metric.LIST_LENGTH_SWEEP],
-    config=EvaluateConfig(
-        sweep_min_lengths=list(range(1, 11)),
-        n_stb_runs=10,
-        stratify_by=["subdivision"],
-    ),
-)
-print(sweep.summary())   # DataFrame: min_len, avg_rank_mean/std, pct_matched_mean/std
-```
-
 ---
 
 ## Adapting TRACE to a New System

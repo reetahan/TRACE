@@ -63,7 +63,8 @@ def run_single_simulation(
     list_length_params=None, 
     save_best_sample=False,
     run_priority_analysis=False,
-    max_p=None
+    max_p=None,
+    custom_matching_fn=None
 ):
     t_total_start = time.perf_counter()
     timings = {}
@@ -274,7 +275,9 @@ def run_single_simulation(
 
     system_name = priority_config.get('__meta__', {}).get('system_name', '') if priority_config else ''
 
-    if system_name == 'NYC':
+    if custom_matching_fn is not None:
+            matches_schools, student_attrs = custom_matching_fn(all_rankings, school_info_df, priority_config, rng)
+    elif system_name == 'NYC':
         matches_schools, student_attrs = run_nyc_priority_matching(
             truncated_rankings=all_rankings,
             district_assignments=all_district_assignments,
@@ -401,7 +404,7 @@ def EM_algorithm(df, match_stats_df, school_info_df,
                  max_iter=10, tol=0.01, K=1, M_simulations=20, seed=40, eta=LEARNING_RATE, outfile=None, 
                  sampling_n_jobs=32, max_iter_opt=5, per_school_lottery=False, 
                  profile_timing=True, priority_config=None, district_to_region=None, 
-                 list_length_params=None, save_best_sample=False, max_p=None):
+                 list_length_params=None, save_best_sample=False, max_p=None, custom_matching_fn=None):
 
 
     cur_experiment_result = ExperimentResult()
