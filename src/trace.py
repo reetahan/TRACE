@@ -173,7 +173,7 @@ class TRACE:
             raise ValueError("_to_em_dataframes requires final_agg_df, match_stats_df, and school_df.")
 
         def _rename(df: pd.DataFrame) -> pd.DataFrame:
-            renamed = df.rename(columns=self._EM_COLUMN_MAP)
+            renamed = df.rename(columns=EM_COLUMN_MAP)
             pct_renames = {
                 col: f"% Matches to Choice 1-{col[len('pct_top_'):]}"
                 for col in df.columns if col.startswith('pct_top_')
@@ -247,7 +247,22 @@ class TRACE:
                 "Implement it for your system, or pass custom_fn to preprocess() "
                 "with further_processing=False."
             )
-        self._final_agg_df, self._match_stats_df, self._school_df = result
+        
+        em_to_generic = {v: k for k, v in EM_COLUMN_MAP.items()}
+
+        def _rename_back(df: pd.DataFrame) -> pd.DataFrame:
+            renamed = df.rename(columns=em_to_generic)
+            pct_renames = {
+                col: f"pct_top_{col[len('% Matches to Choice 1-'):]}"
+                for col in df.columns if col.startswith('% Matches to Choice 1-')
+            }
+            return renamed.rename(columns=pct_renames)
+
+        self._final_agg_df, self._match_stats_df, self._school_df = (
+            _rename_back(result[0]),
+            _rename_back(result[1]),
+            _rename_back(result[2]),
+        )
 
 
     def fit(
@@ -772,7 +787,7 @@ class TRACE:
                 fn.__name__: fn(outcomes, cfg)
                 for fn in custom_function_list
             }
-            
+
         return results
 
     def _run_sweep(self, config: EvaluateConfig) -> SweepResults:

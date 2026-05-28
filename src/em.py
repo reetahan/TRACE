@@ -276,7 +276,11 @@ def run_single_simulation(
     system_name = priority_config.get('__meta__', {}).get('system_name', '') if priority_config else ''
 
     if custom_matching_fn is not None:
-            matches_schools, student_attrs = custom_matching_fn(all_rankings, school_info_df, priority_config, rng)
+        matches_schools, student_attrs = custom_matching_fn(all_rankings, school_info_df, priority_config, rng)
+        matches_idx = np.array([
+            school_to_idx.get(s, -1) if s != '-1' else -1
+            for s in matches_schools
+        ], dtype=np.int32)
     elif system_name == 'NYC':
         matches_schools, student_attrs = run_nyc_priority_matching(
             truncated_rankings=all_rankings,
@@ -548,6 +552,7 @@ def initialize_parameters_global_mixture(districts, df, K=1, rng=None):
         obs_total = df_district.set_index('School DBN')['Ratio'].to_dict()
         
         central_ranking = sorted(schools_list, key=lambda s: obs_total[s], reverse=True)
+        
         
         params['districts'][district] = {
             'schools': schools_list,

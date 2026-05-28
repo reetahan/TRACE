@@ -12,7 +12,7 @@ UTILITY_PENALTY = -0.1
 LEARNING_RATE = 0.1
 
 # pct_top_{k} columns are handled separately in _to_em_dataframes().
-_EM_COLUMN_MAP: dict[str, str] = {
+EM_COLUMN_MAP: dict[str, str] = {
     'subdivision':       'Residential District',
     'school_id':         'School DBN',
     'n_applicants':      'Total Applicants by Residential District',
