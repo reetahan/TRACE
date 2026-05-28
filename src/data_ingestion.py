@@ -2,9 +2,32 @@
 import pandas as pd
 import numpy as np
 from util import log_and_print
+from constants import EM_COLUMN_MAP
+
+_em_to_generic = {v: k for k, v in EM_COLUMN_MAP.items()}
+
+def to_generic(df: pd.DataFrame) -> pd.DataFrame:
+    """Rename em.py internal column names to TRACE generic names."""
+    renamed = df.rename(columns=_em_to_generic)
+    pct = {
+        c: f"pct_top_{c[len('% Matches to Choice 1-'):]}"
+        for c in df.columns if c.startswith('% Matches to Choice 1-')
+    }
+    return renamed.rename(columns=pct)
 
 def preprocess_data(df, match_stats_df, school_info_df, addtl_school_info_df=None):
-    return nyc_preprocess_data(df, match_stats_df, school_info_df, addtl_school_info_df)
+    """
+    Default implementation for NYC. For a new system, replace the body with your
+    own preprocessing. Return three DataFrames with TRACE generic column names:
+
+      final_agg_df  : school_id, subdivision, rank
+      school_df     : school_id, capacity
+      match_stats_df: subdivision, n_students, pct_unmatched, pct_top_{k}
+    """
+    df_em, match_em, school_em = nyc_preprocess_data(
+        df, match_stats_df, school_info_df, addtl_school_info_df
+    )
+    return to_generic(df_em), to_generic(match_em), to_generic(school_em)
 
 def read_data(file_path, sheet=0, is_first_row_header=False):
     """

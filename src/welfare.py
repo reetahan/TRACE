@@ -596,17 +596,18 @@ def evaluate_simulation_output(
             if vp:
                 saved_paths[f"rank_variance_plot_{cat}"] = vp
 
-        saved_paths["top_p_sweep_by_list_length"] = _csv(
-            by_length, "top_p_sweep_by_list_length.csv"
-        )
-        saved_paths["list_length_plot"] = plot_top_p_sweep_vs_list_length(
-            by_length, highlight_ps, base_dir / "top_p_sweep_vs_list_length.png", show
-        )
-        saved_paths["avg_rank_by_list_length_plot"] = plot_avg_rank_by_list_length(
-            by_length, base_dir / "avg_rank_by_list_length.png", show
-        )
+        if not by_length.empty:
+            saved_paths["top_p_sweep_by_list_length"] = _csv(
+                by_length, "top_p_sweep_by_list_length.csv"
+            )
+            saved_paths["list_length_plot"] = plot_top_p_sweep_vs_list_length(
+                by_length, highlight_ps, base_dir / "top_p_sweep_vs_list_length.png", show
+            )
+            saved_paths["avg_rank_by_list_length_plot"] = plot_avg_rank_by_list_length(
+                by_length, base_dir / "avg_rank_by_list_length.png", show
+            )
 
-        if by_priority is not None:
+        if by_priority is not None and not by_priority.empty:
             saved_paths["top_p_sweep_by_priority_percentile"] = _csv(
                 by_priority, "top_p_sweep_by_priority_percentile.csv"
             )
@@ -634,9 +635,10 @@ def evaluate_simulation_output(
     else:
         plot_global_sweep(global_sweep, show=show)
         plot_rank_distribution(rank_dist, show=show)
-        plot_top_p_sweep_vs_list_length(by_length, highlight_ps, show=show)
-        plot_avg_rank_by_list_length(by_length, show=show)
-        if by_priority is not None:
+        if not by_length.empty:
+            plot_top_p_sweep_vs_list_length(by_length, highlight_ps, show=show)
+            plot_avg_rank_by_list_length(by_length, show=show)
+        if by_priority is not None and not by_priority.empty:
             plot_top_p_sweep_vs_priority_percentile(by_priority, highlight_ps, show=show)
         for category, summary in by_category.items():
             plot_top_p_sweep_by_category(summary, category, highlight_ps, show=show)

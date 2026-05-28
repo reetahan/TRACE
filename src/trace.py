@@ -248,21 +248,7 @@ class TRACE:
                 "with further_processing=False."
             )
         
-        em_to_generic = {v: k for k, v in EM_COLUMN_MAP.items()}
-
-        def _rename_back(df: pd.DataFrame) -> pd.DataFrame:
-            renamed = df.rename(columns=em_to_generic)
-            pct_renames = {
-                col: f"pct_top_{col[len('% Matches to Choice 1-'):]}"
-                for col in df.columns if col.startswith('% Matches to Choice 1-')
-            }
-            return renamed.rename(columns=pct_renames)
-
-        self._final_agg_df, self._match_stats_df, self._school_df = (
-            _rename_back(result[0]),
-            _rename_back(result[1]),
-            _rename_back(result[2]),
-        )
+        self._final_agg_df, self._match_stats_df, self._school_df = result
 
 
     def fit(
