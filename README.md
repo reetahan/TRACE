@@ -145,6 +145,22 @@ The three returned DataFrames must have these columns:
 | `school_df` | `school_id`, `capacity`|
 | `match_stats_df` | `subdivision`, `n_students`, `pct_top_{k}` (one column per k, e.g. `pct_top_3`), `pct_unmatched` |
 
+Note the mallows_params_fpath will be a pickle of a dict with structure:
+
+```python
+   {
+     'global_phis':    [float, ...],           # dispersion params, length K; lower = more concentrated
+     'global_weights': [float, ...],           # mixture weights summing to 1.0, length K
+     'districts': {
+       subdivision_id: {
+         'schools':         [school_id, ...],  # all schools available in this subdivision
+         'central_ranking': [school_id, ...],  # sigma_d — schools ordered most- to least-preferred
+       }, ...
+     }
+   }
+```
+This is produced by fit() in Mode 1, but the user can construct manually to test custom parameter configurations, aka Mode 2.
+
 
 **`custom_user_functions.py`: the extension file**
 
