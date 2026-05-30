@@ -45,7 +45,7 @@ TRACE exposes a single `TRACE` class in `src/trace.py`. Three modes are supporte
 
 ```python
 from trace import TRACE
-from types import EvaluateConfig
+from types_trace import EvaluateConfig
 
 model = TRACE(
     final_aggregates_fpath  = "data/agg_app_stats.csv",
@@ -53,7 +53,7 @@ model = TRACE(
     school_data_fpath       = "data/school_info.csv",
     priority_config_fpath   = "data/priority_config.json",
 )
-model.preprocess()   # calls preprocess_data() in data_ingestion.py
+model.preprocess()  # defaults to NYC pipeline; pass fn='chile' or fn=your_fn for other systems
 model.fit(K=6, M=15, max_iter=20, n_jobs=32, seed=40,
           list_length_params={"list_length_mode": "gaussian",
                               "list_length_mean": 7, "list_length_std": 2,
@@ -107,8 +107,10 @@ results = model.evaluate(config=EvaluateConfig(stratify_by=["subdivision", "fema
 
 ## Adapting TRACE to a New System
 
-**1. Implement `preprocess_data` in `data_ingestion.py`**
+**1. Write a preprocessing function and register it in `custom_user_functions.py`**
 
+
+Implement a function with this signature in `custom_user_functions.py`:
 
 ```python
 def preprocess_data(final_agg_df, match_stats_df, school_df, addtl_df=None):
@@ -119,7 +121,15 @@ def preprocess_data(final_agg_df, match_stats_df, school_df, addtl_df=None):
     return final_agg_df, match_stats_df, school_df
 ```
 
-Two reference implementations are provided:
+Then pass it to `preprocess()`:
+
+```python
+from custom_user_functions import preprocess_data
+model.preprocess(fn=preprocess_data)
+```
+
+Calling `model.preprocess()` with no argument defaults to the NYC pipeline. Pass `fn='chile'` for the Chilean pipeline. Reference implementations are provided:
+
 
 | Function | System | Notes |
 |---|---|---|
@@ -132,9 +142,19 @@ The three returned DataFrames must have these columns:
 | DataFrame | Required columns |
 |---|---|
 | `final_agg_df` | `school_id`, `subdivision`, `rank` |
-| `school_df` | `school_id`, `capacity`, `utilization` (used for fit diagnostics) |
+| `school_df` | `school_id`, `capacity`|
 | `match_stats_df` | `subdivision`, `n_students`, `pct_top_{k}` (one column per k, e.g. `pct_top_3`), `pct_unmatched` |
 
+
+**`custom_user_functions.py`: the extension file**
+
+This file is imported by TRACE at startup (`from custom_user_functions import *`) and controls three things:
+
+- **`COLUMN_MAPS`**: a `dict[DataKey, dict[str, str]]` applied automatically when each DataFrame is loaded, so you can use your raw column names without renaming files.
+- **`preprocess_data`**: the preprocessing function template (return `None` to fall back to the NYC default, must return `(final_agg_df, match_stats_df, school_df)` in generic format; call `model.preprocess()` with no argument to use the NYC default without invoking this function.
+- **Custom evaluation functions**: any additional functions you define here can be passed to `evaluate(custom_function_list=[...])`.
+
+The file ships with no-op defaults so it always compiles without modification.
 
 **2. Write a priority config JSON**
 
@@ -182,8 +202,30 @@ Pass any subset to `evaluate(metrics=[...])`. All run by default except `LIST_LE
 | `TOP_P_BY_PRIORITY_PERCENTILE` | Top-p rates by priority score percentile bin (requires `priority_col` or `priority_matrix` in `EvaluateConfig`) |
 | `TOP_P_BY_CONJUNCTION` | Top-p rates at intersections of multiple categories (requires `conjunctions` in `EvaluateConfig`) |
 | `LIST_LENGTH_SWEEP` | Counterfactual welfare sweep over minimum list length requirements; runs `n_stb_runs` DA simulations per length value (requires prior `fit()`) |
+| `MTB_VS_STB` | Welfare comparison between multiple tie-breaking (MTB) and single tie-breaking (STB) lottery rules |
 
-**3. Add custom evaluation functions**
+**List length parameterization**
+
+`list_length_params` supports four modes:
+
+| `list_length_mode` | Required keys | Description |
+|---|---|---|
+| `gaussian` | `list_length_mean`, `list_length_std`, `list_length_min` | Single Gaussian clipped at min and max schools |
+| `gaussian_per_subdivision` | `mean_per_subdivision` (dict of subdivision → mean), `list_length_std`, `list_length_min` | Per-subdivision Gaussians |
+| `empirical` | `list_length_empirical_probs` (dict of length → probability) | Draws from an observed length distribution |
+| `fixed` | `k_ranking_length` | All students submit lists of exactly this length |
+
+
+**3. Customize column names and add evaluation functions**
+
+If your raw data uses different column names, add rename maps to `COLUMN_MAPS` in `custom_user_functions.py` — they are applied automatically when each file is loaded:
+
+```python
+COLUMN_MAPS = {
+    DataKey.INDIVIDUAL: {"student": "student_id", "school": "school_id", "pref": "preference_number"},
+    DataKey.SCHOOL:     {"rbd": "school_id", "seats": "capacity"},
+}
+```
 
 Define any additional evaluation functions in `custom_user_functions.py` and pass them to `evaluate()`:
 
@@ -205,8 +247,8 @@ Each function receives `(MatchOutcomes, EvaluateConfig)` and should return a res
 | File | Role |
 |---|---|
 | `src/trace.py` | **TRACE API** — main entry point for all three modes |
-| `src/types.py` | Shared types: `DataKey`, `Metric`, `EvaluateConfig`, `MatchOutcomes`, `SweepResults` |
-| `src/data_ingestion.py` | Data loading and preprocessing; implement `preprocess_data()` here |
+| `src/types_trace.py` | Shared types: `DataKey`, `Metric`, `EvaluateConfig`, `MatchOutcomes`, `SweepResults` |
+| `src/data_ingestion.py` | Data loading, preprocessing utilities, and reference implementations (`nyc_preprocess_data`, `preprocess_chilean_data`, `to_generic`) |
 | `src/priority_attributes.py` | Generic priority attribute sampling and composite rank matrix construction |
 | `src/mallows.py` | Mallows model: sampling rankings and computing likelihoods |
 | `src/gale_shapley.py` | Student-proposing Deferred Acceptance with configurable priority rules |
@@ -215,6 +257,7 @@ Each function receives `(MatchOutcomes, EvaluateConfig)` and should return a res
 | `src/list_length.py` | List length sampling utilities |
 | `src/util.py` | Shared utilities |
 | `src/constants.py` | Geographic and demographic mappings |
+| `src/custom_user_functions.py` | User extension point: column rename maps (`COLUMN_MAPS`), custom preprocessing function, and custom evaluation functions; ships with no-op defaults |
 
 ---
 
@@ -246,7 +289,6 @@ TRACE requires aggregate matching statistics organized by student subgroup (e.g.
 - The fraction matched to their top-1, top-2, ..., top-p choice (the target moments for EM calibration)
 - Program-level seat capacities and observed fill rates
 
-These subdivision-level targets ensure the model is calibrated to subgroup-specific outcomes rather than population-level averages alone.
 
 A **priority configuration** (JSON) specifies the school-side priority system: priority tiers, reserve pools and their seat fractions, eligibility criteria, and admission method classifications. See `sample-data/data/nyc_priority_config.json` for a worked example covering NYC's unscreened, screened, EdOpt, and zoned program types.
 
@@ -262,7 +304,10 @@ Python 3.8+ with `numpy`, `pandas`, `scipy`, and `matplotlib`. The data preproce
 
 ---
 
-## True Recovered Parameters
+## Paper Results | NYC Empirical Application
+
+The values below are from the paper's NYC application and are provided as a reference for expected output. They are not configuration defaults.
+
 
 | Parameter | Definition / Initialization | Estimated Value | Weight $w_k$ |
 |---|---|---|---|
@@ -292,4 +337,4 @@ Python 3.8+ with `numpy`, `pandas`, `scipy`, and `matplotlib`. The data preproce
 
 ## Version Notes
 
-This is TRACE v1.0. The current release requires users to preprocess their data into a fixed schema before passing it to the API (see `preprocess_data()` in `data_ingestion.py`). A future release may include automated ingestion that handles a wider variety of raw input formats without requiring manual schema alignment.
+This is TRACE v1.0. The current release requires users to preprocess their data into a fixed schema before passing it to the API (see `preprocess_data()` in `custom_user_functions.py`). A future release may include automated ingestion that handles a wider variety of raw input formats without requiring manual schema alignment.
