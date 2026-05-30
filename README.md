@@ -215,7 +215,6 @@ Each function receives `(MatchOutcomes, EvaluateConfig)` and should return a res
 | `src/list_length.py` | List length sampling utilities |
 | `src/util.py` | Shared utilities |
 | `src/constants.py` | Geographic and demographic mappings |
-| `src/driver.py` | Top-level experiment driver |
 
 ---
 

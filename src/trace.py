@@ -18,7 +18,7 @@ from mallows import sample_students_global_mixture
 from gale_shapley import gale_shapley_per_school_numba_wrapper
 from list_length import sample_truncated_normal_lengths, sample_empirical_lengths
 from priority_attributes import sample_student_attributes, build_composite_rank_matrix
-from data_ingestion import preprocess_data
+from data_ingestion import nyc_preprocess_data, preprocess_chilean_data, to_generic
 
 
 class TRACE:
@@ -62,8 +62,7 @@ class TRACE:
         self._load_raw()
 
         if custom_preprocessing_function is not None:
-            self.preprocess(custom_fn=custom_preprocessing_function, further_processing=False)
-
+            self.preprocess(fn=custom_preprocessing_function)
 
     @property
     def mode(self) -> int:
@@ -88,14 +87,19 @@ class TRACE:
 
 
     def _load_raw(self):
+        def _load(fpath, key):
+            df = self._read_file(fpath)
+            m = COLUMN_MAPS.get(key, {})
+            return df.rename(columns=m) if m else df
+
         if self._individual_fpath:
-            self._individual_df = self._read_file(self._individual_fpath)
+            self._individual_df  = _load(self._individual_fpath,      DataKey.INDIVIDUAL)
         if self._school_fpath:
-            self._school_df = self._read_file(self._school_fpath)
+            self._school_df      = _load(self._school_fpath,          DataKey.SCHOOL)
         if self._match_stats_fpath:
-            self._match_stats_df = self._read_file(self._match_stats_fpath)
+            self._match_stats_df = _load(self._match_stats_fpath,     DataKey.MATCH_STATS)
         if self._final_aggregates_fpath:
-            self._final_agg_df = self._read_file(self._final_aggregates_fpath)
+            self._final_agg_df   = _load(self._final_aggregates_fpath, DataKey.FINAL_AGGREGATES)
         if self._mallows_params_fpath:
             with open(self._mallows_params_fpath, 'rb') as f:
                 self._mallows_params = pickle.load(f)
@@ -121,7 +125,11 @@ class TRACE:
             DataKey.FINAL_AGGREGATES: self._final_agg_df,
         }[key]
 
-    def set_df(self, key: DataKey, df: pd.DataFrame):
+    def set_df(self, key: DataKey, df: pd.DataFrame,
+               column_map: dict[str, str] | None = None):
+        m = column_map or COLUMN_MAPS.get(key, {})
+        if m:
+            df = df.rename(columns=m)
         self._validate_df(key, df)
         if key == DataKey.INDIVIDUAL:
             self._individual_df = df
@@ -131,6 +139,7 @@ class TRACE:
             self._match_stats_df = df
         elif key == DataKey.FINAL_AGGREGATES:
             self._final_agg_df = df
+            
 
     def get_priority_config(self) -> dict | None:
         return self._priority_config
@@ -152,18 +161,6 @@ class TRACE:
         missing = [c for c in REQUIRED_COLUMNS.get(key, []) if c not in df.columns]
         if missing:
             raise ValueError(f"DataFrame for {key.value} is missing columns: {missing}")
-
-    @staticmethod
-    def _validate_custom_preprocessing_output(result: dict):
-        if not isinstance(result, dict):
-            raise TypeError(f"Custom preprocessing fn must return dict, got {type(result)}.")
-        for key, df in result.items():
-            if not isinstance(key, DataKey):
-                raise TypeError(f"Keys must be DataKey members, got {type(key)}.")
-            if not isinstance(df, pd.DataFrame):
-                raise TypeError(f"Values must be DataFrames, got {type(df)} for {key}.")
-            TRACE._validate_df(key, df)
-
 
     def _to_em_dataframes(self) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """
@@ -201,55 +198,51 @@ class TRACE:
         return result
 
 
-    def preprocess(
-        self,
-        custom_fn: Callable[[dict[DataKey, pd.DataFrame]], dict[DataKey, pd.DataFrame]] | None = None,
-        further_processing: bool = True,
-    ) -> TRACE:
+    def preprocess(self, fn=None) -> TRACE:
         """
-        Apply optional custom_fn first, then _run_internal_preprocessing if further_processing=True.
+        fn: which preprocessing pipeline to run.
+              None       → NYC (default, logged)
+             'nyc'       → NYC pipeline
+             'chile'     → Chilean pipeline
+              callable   → user-provided function from custom_user_functions.py.
+                           Signature: (final_agg_df, match_stats_df, school_df, addtl_df=None)
+                                    → (final_agg_df, match_stats_df, school_df) in TRACE generic format
 
-        custom_fn signature: (dict[DataKey, DataFrame]) -> dict[DataKey, DataFrame].
-        Set further_processing=False if custom_fn already returns fully processed DataFrames.
-
+        Skip entirely if DataFrames are already preprocessed and loaded via set_df().
         """
-        if custom_fn is not None:
-            raw = {k: v for k, v in {
-                DataKey.INDIVIDUAL:       self._individual_df,
-                DataKey.SCHOOL:           self._school_df,
-                DataKey.MATCH_STATS:      self._match_stats_df,
-                DataKey.FINAL_AGGREGATES: self._final_agg_df,
-            }.items() if v is not None}
-            result = custom_fn(raw)
-            self._validate_custom_preprocessing_output(result)
-            for key, df in result.items():
-                self.set_df(key, df)
-
-        if further_processing:
-            self._run_internal_preprocessing()
-
+        self._run_internal_preprocessing(fn)
         return self
 
-    def _run_internal_preprocessing(self):
-        """
-        Calls preprocess_data() from data_ingestion.py.
-        """
-        
+    def _run_internal_preprocessing(self, fn=None):
 
-        result = preprocess_data(
-            self._final_agg_df,
-            self._match_stats_df,
-            self._school_df,
-        )
-        if result is None:
-            raise NotImplementedError(
-                "preprocess_data() in data_ingestion.py returned None. "
-                "Implement it for your system, or pass custom_fn to preprocess() "
-                "with further_processing=False."
+        if fn is None:
+            print("[TRACE] No preprocessing function specified — defaulting to NYC pipeline.")
+            fn = 'nyc'
+
+        if fn == 'nyc':
+            df_em, match_em, school_em = nyc_preprocess_data(
+                self._final_agg_df, self._match_stats_df, self._school_df, None
             )
-        
-        self._final_agg_df, self._match_stats_df, self._school_df = result
+            result = to_generic(df_em), to_generic(match_em), to_generic(school_em)
 
+        elif fn == 'chile':
+            df_em, match_em, school_em = preprocess_chilean_data(
+                self._final_agg_df, self._match_stats_df, self._school_df
+            )
+            result = to_generic(df_em), to_generic(match_em), to_generic(school_em)
+
+        elif callable(fn):
+            result = fn(self._final_agg_df, self._match_stats_df, self._school_df)
+            if not (isinstance(result, tuple) and len(result) == 3):
+                raise ValueError(
+                    "Preprocessing function must return (final_agg_df, match_stats_df, school_df)."
+                )
+        else:
+            raise ValueError(
+                f"Unknown preprocessing option {fn!r}. Use 'nyc', 'chile', or a callable."
+            )
+
+        self._final_agg_df, self._match_stats_df, self._school_df = result
 
     def fit(
         self,
@@ -745,7 +738,7 @@ class TRACE:
                     "Run run_matching() or fit() first."
                 )
 
-        if Metric.LIST_LENGTH_SWEEP in metrics_to_run:
+        if Metric.LIST_LENGTH_SWEEP in (metrics or []):
             return self._run_sweep(cfg)
 
         results = evaluate_simulation_output(
