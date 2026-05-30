@@ -283,15 +283,15 @@ These files implement the empirical applications from the paper and serve as ref
 
 | File | Role |
 |---|---|
-| `src/nyc_experiment_driver.py` | End-to-end NYC inference run |
-| `src/chilean_experiment_driver.py` | End-to-end Chile inference run |
-| `src/nyc_list_len_welfare.py` | Sweeps minimum list length requirements for NYC |
-| `src/nyc_priority_attributes.py` | NYC-specific priority matching (virtual programs, borough tiers) |
-| `src/chile_priority_attributes.py` | Chile-specific priority matching |
-| `src/chilean_real_welfare_comparison.py` | Observed vs. synthetic welfare comparison for Chile |
-| `src/plot_lottery_pure_chance.py` | Pure-lottery welfare benchmark |
-| `src/DataGeneration/NYC/` | R scripts for processing raw NYC DOE data |
-| `src/DataGeneration/Chile/` | R scripts for processing raw Chilean SAE data |
+| `paper-specific-src/nyc_experiment_driver.py` | End-to-end NYC inference run |
+| `paper-specific-src/chilean_experiment_driver.py` | End-to-end Chile inference run |
+| `paper-specific-src/nyc_list_len_welfare.py` | Sweeps minimum list length requirements for NYC |
+| `paper-specific-src/nyc_priority_attributes.py` | NYC-specific priority matching (virtual programs, borough tiers) |
+| `paper-specific-src/chile_priority_attributes.py` | Chile-specific priority matching |
+| `paper-specific-src/chilean_real_welfare_comparison.py` | Observed vs. synthetic welfare comparison for Chile |
+| `paper-specific-src/plot_lottery_pure_chance.py` | Pure-lottery welfare benchmark |
+| `paper-specific-src/DataGeneration/NYC/` | R scripts for processing raw NYC DOE data |
+| `paper-specific-src/DataGeneration/Chile/` | R scripts for processing raw Chilean SAE data |
 
 ---
 
