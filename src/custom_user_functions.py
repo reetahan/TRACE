@@ -1,4 +1,4 @@
-from types import DataKey, MatchOutcomes, EvaluateConfig
+from types_trace import DataKey, MatchOutcomes, EvaluateConfig
 from data_ingestion import nyc_preprocess_data, to_generic
 
 # ── Column mappings ───────────────────────────────────────────────────────────

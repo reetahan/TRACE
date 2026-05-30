@@ -201,12 +201,12 @@ class TRACE:
     def preprocess(self, fn=None) -> TRACE:
         """
         fn: which preprocessing pipeline to run.
-              None       → NYC (default, logged)
-             'nyc'       → NYC pipeline
-             'chile'     → Chilean pipeline
-              callable   → user-provided function from custom_user_functions.py.
+              None       -> NYC (default, logged)
+             'nyc'       -> NYC pipeline
+             'chile'     -> Chilean pipeline
+              callable   -> user-provided function from custom_user_functions.py.
                            Signature: (final_agg_df, match_stats_df, school_df, addtl_df=None)
-                                    → (final_agg_df, match_stats_df, school_df) in TRACE generic format
+                                    -> (final_agg_df, match_stats_df, school_df) in TRACE generic format
 
         Skip entirely if DataFrames are already preprocessed and loaded via set_df().
         """
@@ -537,7 +537,7 @@ class TRACE:
             dbn_to_progs = {str(s): [str(s)] for s in all_schools}
 
             if observed_student_attrs is not None:
-                # Mode 3: observed binary flags → list-of-dicts.
+                # Mode 3: observed binary flags -> list-of-dicts.
                 # School-dependent keys (sibling_school, continuing_school, etc.) are
                 # absent; those priority groups will not apply per-school.
                 student_attrs_list = observed_student_attrs.reset_index(drop=True).to_dict('records')
@@ -661,9 +661,13 @@ class TRACE:
                     warnings.append(f"{context}: tier entry {t} is missing required 'group' field.")
 
         defaults = config.get('system_defaults', {})
-        if not defaults:
+        has_per_school_entries = any(
+            k not in ('__meta__', 'system_defaults', 'region_overrides', 'school_overrides')
+            for k in config
+        )
+        if not defaults and not has_per_school_entries:
             warnings.append("system_defaults is missing; system-level fractions and tiers not set.")
-        else:
+        elif defaults:
             _check_fracs(defaults.get('student_attribute_fractions', {}), 'system_defaults')
             _check_tiers(defaults.get('priority_tiers', []), 'system_defaults.priority_tiers')
 
