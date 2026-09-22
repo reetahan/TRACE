@@ -17,7 +17,7 @@ Usage:
         --output_uncond welfare_uncond.png \
         --output_cond   welfare_cond.png \
         --n_stb_runs 10 \
-        --max_p      10 \
+        --max_p      12 \
         --seed       42
 """
 
@@ -291,7 +291,7 @@ def main():
     parser.add_argument('--output_diff_bar', default='welfare_diff_bar.png',
                          help='Fig. 6 style STB-MTB difference bar chart.')
     parser.add_argument('--n_stb_runs',   type=int, default=10)
-    parser.add_argument('--max_p',        type=int, default=10)
+    parser.add_argument('--max_p',        type=int, default=12)
     parser.add_argument('--seed',         type=int, default=DATA_GENERATION_SEED)
     args = parser.parse_args()
 

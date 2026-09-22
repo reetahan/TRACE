@@ -381,6 +381,9 @@ def run_sweep(params, lottery, df, match_stats_df, school_info_df,
             welfare_results.student_level['student_id'].isin(baseline_matched_student_ids)
         ]
         cohort_stats = _rank_stats(cohort_df['match_rank'])
+        # Unconditional over the cohort (unmatched counts as not-top-3), same
+        # convention as top_p_pct elsewhere (welfare.py's _top_p_flag).
+        cohort_top3_pct = 100 * cohort_df['match_rank'].le(3).fillna(False).mean()
 
         print(f"  pct_matched: {stats['pct_matched']:.2f}%")
         print(f"  avg_rank:    {stats['avg_rank']:.3f}")
@@ -399,6 +402,7 @@ def run_sweep(params, lottery, df, match_stats_df, school_info_df,
             'n_total':                    int(n_total),
             'avg_rank_baseline_cohort':   round(cohort_stats['avg_rank'], 4),
             'pct_baseline_cohort_matched': round(100 * cohort_df['matched'].mean(), 4),
+            'top3_baseline_cohort':       round(cohort_top3_pct, 4),
         })
 
         borough_sweep = welfare_results.top_p_sweep_by_category.get('borough')
@@ -436,7 +440,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--params',      required=True)
     parser.add_argument('--output_dir',  required=True)
-    parser.add_argument('--min_lengths', type=int, nargs='+', default=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+    parser.add_argument('--min_lengths', type=int, nargs='+', default=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
     parser.add_argument('--seed',        type=int, default=DATA_GENERATION_SEED)
     parser.add_argument('--n_jobs',      type=int, default=32)
     parser.add_argument('--df_filepath', type=str, default=None)

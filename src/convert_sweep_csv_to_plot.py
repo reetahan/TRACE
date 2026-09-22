@@ -57,6 +57,75 @@ def plot_single_metric(df, overall_val, group_data, group_col, group_values,
     plt.close(fig)
     print(f"Saved: {output_path}")
 
+def plot_overall_match_and_top3(df, overall_top3, b_matched, b_stats, output_path):
+    """Overall + per-borough match % and top-3 % vs. minimum list length --
+    12 lines: {Overall, 5 boroughs} x {Match %, Top-3 %}.
+
+    overall_top3 is joined to df on list_length_min rather than assumed
+    positionally aligned, since it comes from a separate groupby that isn't
+    guaranteed to share df's row order.
+"""
+    merged = pd.merge(
+        df[['list_length_min', 'pct_matched']],
+        overall_top3[['list_length_min', 'top_p_pct']],
+        on='list_length_min',
+    ).sort_values('list_length_min').reset_index(drop=True)
+
+    match_handles, match_labels = [], []
+    top3_handles, top3_labels = [], []
+
+    fig, ax = plt.subplots(figsize=(9, 5.5))
+    h, = ax.plot(merged['list_length_min'], merged['pct_matched'],
+                 marker='o', color='black', linewidth=LWIDTH_OVERALL, linestyle='-',
+                 markersize=MSIZE, zorder=5)
+    match_handles.append(h); match_labels.append('Overall')
+    h, = ax.plot(merged['list_length_min'], merged['top_p_pct'],
+                 marker='s', color='black', linewidth=LWIDTH_OVERALL, linestyle='--',
+                 markersize=MSIZE, zorder=5)
+    top3_handles.append(h); top3_labels.append('Overall')
+
+    for code, name in BOROUGH_NAMES.items():
+        color = BOROUGH_COLORS[code]
+        gm = b_matched[b_matched['borough'] == code].sort_values('list_length_min')
+        if not gm.empty:
+            h, = ax.plot(gm['list_length_min'], gm['pct_matched'],
+                         marker='o', color=color, linewidth=LWIDTH_GROUP, linestyle='-',
+                         markersize=MSIZE)
+            match_handles.append(h); match_labels.append(name)
+        gs = b_stats[b_stats['borough'] == code].sort_values('list_length_min')
+        if not gs.empty:
+            h, = ax.plot(gs['list_length_min'], gs['top_p_pct'],
+                         marker='s', color=color, linewidth=LWIDTH_GROUP, linestyle='--',
+                         markersize=MSIZE)
+            top3_handles.append(h); top3_labels.append(name)
+
+    ax.relim()
+    ax.autoscale_view()
+    ax.grid(True, alpha=0.3, linestyle='--')
+    ax.set_xlabel('Minimum List Length', fontsize=FONT)
+    ax.set_ylabel('Match Rate (%)', fontsize=FONT)
+    ax.tick_params(axis='both', labelsize=FONT)
+
+    legend_kwargs = dict(fontsize=LEGEND_FONT - 1, title_fontsize=LEGEND_FONT,
+                          loc='upper left', frameon=True, framealpha=1,
+                          facecolor='white', edgecolor='black')
+    match_legend = ax.legend(match_handles, match_labels, title='Match %',
+                              bbox_to_anchor=(1.02, 1.0), **legend_kwargs)
+    ax.add_artist(match_legend)
+
+    fig.canvas.draw()
+    match_bbox_axes = match_legend.get_window_extent(
+        renderer=fig.canvas.get_renderer()
+    ).transformed(ax.transAxes.inverted())
+    gap = 0.03
+    ax.legend(top3_handles, top3_labels, title='Top-3 %',
+              bbox_to_anchor=(1.02, match_bbox_axes.y0 - gap), **legend_kwargs)
+
+    fig.savefig(output_path, dpi=200, bbox_inches='tight', transparent=True)
+    plt.close(fig)
+    print(f"Saved: {output_path}")
+
+
 def plot_sweep(df, overall_df, group_data_matched, group_data_stats,
                group_col, group_values, group_names, group_colors,
                linestyle, output_path, overall_vals=None, overall_top3=None):
@@ -73,10 +142,17 @@ def plot_sweep(df, overall_df, group_data_matched, group_data_stats,
                 marker='o', color='black', linewidth=LWIDTH_OVERALL,
                 markersize=MSIZE, label='Overall', zorder=5)
 
-    if 'avg_rank_baseline_cohort' in overall_df.columns:
-        axes[1].plot(overall_df['list_length_min'], overall_df['avg_rank_baseline_cohort'],
-                     marker='s', color='black', linewidth=LWIDTH_OVERALL, linestyle='--',
-                     markersize=MSIZE, label='Overall (baseline-matched cohort only)', zorder=5)
+    baseline_cohort_col = {
+        0: 'pct_baseline_cohort_matched',
+        1: 'avg_rank_baseline_cohort',
+        2: 'top3_baseline_cohort',
+    }
+    for i, ax in enumerate(axes):
+        col = baseline_cohort_col[i]
+        if col in overall_df.columns:
+            ax.plot(overall_df['list_length_min'], overall_df[col],
+                    marker='s', color='black', linewidth=LWIDTH_OVERALL, linestyle='--',
+                    markersize=MSIZE, label='Overall (baseline-matched cohort only)', zorder=5)
 
     for val in group_values:
         color = group_colors[val]
@@ -99,16 +175,21 @@ def plot_sweep(df, overall_df, group_data_matched, group_data_stats,
     for ax in axes:
         ax.relim()
         ax.autoscale_view()
-        #ax.grid(True, alpha=0.3, linestyle='--')
+        ax.grid(True, alpha=0.3, linestyle='--')
         ax.set_xlabel('Minimum List Length', fontsize=FONT)
         ax.tick_params(axis='both', labelsize=FONT)
-        ax.legend(fontsize=LEGEND_FONT, loc='lower right')
 
     axes[0].set_ylabel('% Matched', fontsize=FONT)
     axes[1].set_ylabel('Average Rank', fontsize=FONT)
     axes[2].set_ylabel('Top-3 Match Rate (%)', fontsize=FONT)
 
-    fig.tight_layout()
+    handles, labels = axes[0].get_legend_handles_labels()
+    n_cols = min(len(labels), 6)
+    n_legend_rows = -(-len(labels) // n_cols)  # ceil
+    fig.legend(handles, labels, fontsize=LEGEND_FONT, loc='upper center',
+               bbox_to_anchor=(0.5, 0.0), ncol=n_cols, frameon=True)
+    fig.subplots_adjust(bottom=0.12 + 0.06 * n_legend_rows)
+
     fig.savefig(output_path, dpi=200, bbox_inches='tight')
     plt.close(fig)
     print(f"Saved: {output_path}")
@@ -144,6 +225,12 @@ def main(sweep_dir):
         'avg_rank':    df['avg_rank'],
         'top_p_pct':   overall_top3['top_p_pct'],
     }
+
+    # Overall + per-borough match % vs top-3 match %, by minimum list length
+    plot_overall_match_and_top3(
+        df, overall_top3, b_matched, b_stats,
+        output_path=in_path('overall_match_and_top3_vs_min_list_length.png'),
+    )
 
     # Figure 1 — borough breakdown
     plot_sweep(
