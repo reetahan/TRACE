@@ -385,28 +385,7 @@ if __name__ == '__main__':
             print(f"  Mean abs district diff:      {np.mean(abs_util_diffs):.1f}pp")
             print(f"──────────────────────────────────────────────\n")
 
-            print_match_rate_analysis(best_block)
-
-    for region in sorted(best_block.keys()):
-        vals = best_block[region]
-        n_stats = len(vals['obs'])
-        # find top3, top10, unmatched indices
-        # metrics list matches what parse_log produces: [top1, top2, ..., unmatched]
-        metrics_here = [f'top{p}' for p in range(1, n_stats)] + ['unmatched']
-        idx = {k: i for i, k in enumerate(metrics_here)}
-        top3    = vals['obs'][idx['top3']]   if 'top3'    in idx else None
-        top10   = vals['obs'][idx['top10']]  if 'top10'   in idx else None
-        unmatched = vals['obs'][idx['unmatched']]
-        top3_sim    = vals['sim'][idx['top3']]   if 'top3'    in idx else None
-        top10_sim   = vals['sim'][idx['top10']]  if 'top10'   in idx else None
-        unmatched_sim = vals['sim'][idx['unmatched']]
-        print(f"  {region}:")
-        if top3 is not None:
-            print(f"    top3:      obs={top3:.2f}%  sim={top3_sim:.2f}%  diff={top3-top3_sim:+.2f}")
-        if top10 is not None:
-            print(f"    top10:     obs={top10:.2f}%  sim={top10_sim:.2f}%  diff={top10-top10_sim:+.2f}")
-        print(f"    unmatched: obs={unmatched:.2f}%  sim={unmatched_sim:.2f}%  diff={unmatched-unmatched_sim:+.2f}")
-
+    print_match_rate_analysis(best_block)
 
     print(f"\n── Validation Stats ──────────────────────────")
     print(f"  Overall log-likelihood (best iter): {best_ll:.2f}")
