@@ -16,6 +16,33 @@ from list_length import sample_truncated_normal_lengths, sample_empirical_length
 from nyc_priority_attributes import run_nyc_priority_matching
 from chile_priority_attributes import prepare_chile_numba_inputs_from_rankings
 
+def _resolve_loss_indices(loss_top_p, loss_include_unmatched, max_p, n_stats):
+    """
+    Map (loss_top_p, loss_include_unmatched) to positional indices into the
+    match_stats vector used by the
+    EM loss. 
+    """
+    if loss_top_p is not None:
+        if max_p is None:
+            raise ValueError(
+                "loss_top_p requires max_p to be set explicitly"
+            )
+        invalid = [p for p in loss_top_p if not (1 <= p <= max_p)]
+        if invalid:
+            raise ValueError(
+                f"loss_top_p contains p values {invalid} outside the available range "
+                f"[1, {max_p}] (max_p={max_p})."
+            )
+        target_indices = [p - 1 for p in loss_top_p]
+    else:
+        target_indices = list(range(n_stats - 1))
+    if loss_include_unmatched:
+        target_indices = target_indices + [n_stats - 1]
+    if not target_indices:
+        raise ValueError("Loss metric selection is empty: set loss_top_p and/or loss_include_unmatched=True.")
+    return target_indices
+
+
 class ExperimentResult:
     def __init__(self):
         self.params = None 
@@ -413,7 +440,7 @@ def EM_algorithm(df, match_stats_df, school_info_df,
                  sampling_n_jobs=32, max_iter_opt=5, per_school_lottery=False,
                  profile_timing=True, priority_config=None, district_to_region=None,
                  list_length_params=None, save_best_sample=False, max_p=None,
-                 raw_capacity_df=None):
+                 raw_capacity_df=None, loss_top_p=None, loss_include_unmatched=True):
 
 
     cur_experiment_result = ExperimentResult()
@@ -435,7 +462,19 @@ def EM_algorithm(df, match_stats_df, school_info_df,
     params = initialize_parameters_global_mixture(districts, df, K, rng=rng_init)
 
     observed_agg = extract_observed_aggregates(df, match_stats_df, max_p=max_p)
-    
+
+    n_stats = len(next(iter(observed_agg.values()))['match_stats'])
+    loss_indices = _resolve_loss_indices(loss_top_p, loss_include_unmatched, max_p, n_stats)
+    if n_stats == 4 and max_p is None:
+        all_metric_names = ["top3", "top5", "top10", "unmatched"]
+    else:
+        all_metric_names = [f"top{p}" for p in range(1, n_stats)] + ["unmatched"]
+    log_and_print(
+        f"  Loss metrics used: {[all_metric_names[i] for i in loss_indices]} "
+        f"(loss_top_p={loss_top_p}, loss_include_unmatched={loss_include_unmatched})",
+        log_file=outfile,
+    )
+
     log_likelihoods = []
     best_params = None
     best_log_like = -np.inf
@@ -459,7 +498,8 @@ def EM_algorithm(df, match_stats_df, school_info_df,
             per_school_lottery=per_school_lottery, priority_config=priority_config,
             district_to_region=district_to_region, list_length_params=list_length_params,
             save_best_sample=save_best_sample, best_phis_seen=best_phis_seen, max_p=max_p,
-            raw_capacity_df=raw_capacity_df,
+            raw_capacity_df=raw_capacity_df, loss_top_p=loss_top_p,
+            loss_include_unmatched=loss_include_unmatched,
         )
 
         log_and_print(f"Checking results of optimizing global mixture...", log_file=outfile)
@@ -573,7 +613,8 @@ def compute_log_likelihood_gaussian_all_districts(params_global, observed_agg,
                                                    priority_config=None, district_to_region=None,
                                                    list_length_params=None, save_best_sample=False,
                                                    profile_timing=True, lottery_fixed=None, max_p=None,
-                                                   raw_capacity_df=None):
+                                                   raw_capacity_df=None, loss_top_p=None,
+                                                   loss_include_unmatched=True):
 
 
     t_total_start = time.perf_counter()
@@ -657,11 +698,13 @@ def compute_log_likelihood_gaussian_all_districts(params_global, observed_agg,
     
     #metric_names = ["top3", "top5", "top10", "unmatched"]
     n_stats = len(next(iter(observed_agg.values()))['match_stats'])
-    if n_stats == 4:
+    if n_stats == 4 and max_p is None:
         metric_names = ["top3", "top5", "top10", "unmatched"]
     else:
         metric_names = [f"top{p}" for p in range(1, n_stats)] + ["unmatched"]
-   
+
+    loss_target_indices = _resolve_loss_indices(loss_top_p, loss_include_unmatched, max_p, n_stats)
+
     for d_idx, district in enumerate(districts):
         obs = np.array(observed_agg[district]['match_stats'], dtype=float)
         sim = np.array(match_stats_accum[d_idx, :], dtype=float) / M
@@ -735,44 +778,9 @@ def compute_log_likelihood_gaussian_all_districts(params_global, observed_agg,
             log_and_print(f"      Warning: Invalid data for district {district}", log_file=outfile)
             continue
 
-        # Get observed vector
-        obs_vec = observed_agg[district]['match_stats']
-
-        # FOR TOP-1 AND UNMATCHED ONLY 
-        #target_indices = [0,-1]
-        #obs_vec = np.asarray(obs_vec)[target_indices]
-        #X = X[:, target_indices]  
-        ###########################
-
-        #FOR TOP-3/5/10 AND UNMATCHED ONLY 
-        #target_indices = [2,4,9,-1]
-        #obs_vec = np.asarray(obs_vec)[target_indices]
-        #X = X[:, target_indices]  
-        ###########################
-
-        # FOR TOP-1 ONLY 
-        #target_indices = [0]
-        #obs_vec = np.asarray(obs_vec)[target_indices]
-        #X = X[:, target_indices]   
-        ###########################
-
-        # FOR UNMATCHED ONLY 
-        #target_indices = [-1]
-        #obs_vec = np.asarray(obs_vec)[target_indices]
-        #X = X[:, target_indices]  
-        ###########################
-
-        # FOR TOP-1/2/3 AND UNMATCHED ONLY 
-        #target_indices = [0,1,2,-1]
-        #obs_vec = np.asarray(obs_vec)[target_indices]
-        #X = X[:, target_indices]  
-        ###########################
-
-        # FOR TOP-1/2/3/4/5 AND UNMATCHED ONLY 
-        #target_indices = [0,1,2,3,4,-1]
-        #obs_vec = np.asarray(obs_vec)[target_indices]
-        #X = X[:, target_indices]  
-        ###########################
+        # Get observed vector, restricted to whichever moments the loss is configured to use
+        obs_vec = np.asarray(observed_agg[district]['match_stats'])[loss_target_indices]
+        X = X[:, loss_target_indices]
 
         # Estimate mean and covariance
         mu = np.mean(X, axis=0)
@@ -844,7 +852,7 @@ def optimize_global_mixture(params, observed_agg, df, match_stats_df,
                             profile_timing=True, priority_config=None,
                             district_to_region=None, list_length_params=None,
                             save_best_sample=False, best_phis_seen=None, max_p=None,
-                            raw_capacity_df=None):
+                            raw_capacity_df=None, loss_top_p=None, loss_include_unmatched=True):
 
     t_opt_start = time.perf_counter()
     K = len(params['global_phis'])
@@ -878,7 +886,8 @@ def optimize_global_mixture(params, observed_agg, df, match_stats_df,
                 executor=executor, sampling_n_jobs=sampling_n_jobs, per_school_lottery=per_school_lottery,
                 profile_timing=profile_timing, priority_config=priority_config, district_to_region=district_to_region,
                 list_length_params=list_length_params, save_best_sample=save_best_sample, lottery_fixed=lottery_fixed, max_p=max_p,
-                raw_capacity_df=raw_capacity_df,
+                raw_capacity_df=raw_capacity_df, loss_top_p=loss_top_p,
+                loss_include_unmatched=loss_include_unmatched,
             )
             if total_log_lik > best_log_like_seen:
                 best_log_like_seen = total_log_lik

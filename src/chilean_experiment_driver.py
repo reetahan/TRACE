@@ -13,6 +13,22 @@ from welfare import evaluate_simulation_output
 from list_length import return_chilean_list_params
 import json
 
+
+def _loss_label(loss_top_p, loss_include_unmatched):
+    """Short, unambiguous token for the loss metric selection, embedded in
+    the outfile name so it's visible without opening the log -- redundant
+    with (and independently derived from) the 'Loss metrics used:' line
+    EM_algorithm prints, on purpose: two independent places recording the
+    same fact so a slip in one doesn't silently go unnoticed."""
+    if loss_top_p is None:
+        base = "allTopP"
+    elif loss_top_p:
+        base = "top" + "-".join(str(p) for p in loss_top_p)
+    else:
+        base = "none"
+    return base + ("+unm" if loss_include_unmatched else "")
+
+
 def run_chilean_data_experiment(
     max_iter=20,
     M=10,
@@ -24,16 +40,19 @@ def run_chilean_data_experiment(
     profile_timing=False,
     outfile=None,
     imputation_file=None,
-    save_best_params=True, 
+    save_best_params=True,
     save_best_sample=False,
     max_p=None,
-    exp_name=None
+    exp_name=None,
+    loss_top_p=None,
+    loss_include_unmatched=True,
 ):
-    
+
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if outfile is None:
-        outfile = f'{EXP_OUT_FOLDER}/chile_res_logs/{timestamp}/chilean_experiment_K={K}_M={M}_iter={max_iter}_opt={max_iter_opt}_lr={eta}_maxp={max_p}_seed={seed}_{timestamp}.txt'
+        loss_label = _loss_label(loss_top_p, loss_include_unmatched)
+        outfile = f'{EXP_OUT_FOLDER}/chile_res_logs/{timestamp}/chilean_experiment_K={K}_M={M}_iter={max_iter}_opt={max_iter_opt}_lr={eta}_maxp={max_p}_loss={loss_label}_seed={seed}_{timestamp}.txt'
 
     indv_df = read_data(f"{CHILEAN_DATA_DIR}/{CHILEAN_INDV_PREF_PROVINCE_FILEPATH }")
     match_df = read_data(f"{CHILEAN_DATA_DIR}/{CHILEAN_MATCH_OUTCOME_PROVINCE_FILEPATH}")
@@ -88,6 +107,8 @@ def run_chilean_data_experiment(
         save_best_sample = save_best_sample,
         max_p=max_p,
         raw_capacity_df=school_cap_df,
+        loss_top_p=loss_top_p,
+        loss_include_unmatched=loss_include_unmatched,
     )
 
     params = experiment_results.params
@@ -155,9 +176,14 @@ if __name__ == "__main__":
     parser.add_argument('--save_params', action='store_true', help='Enable saving of parameters to a pickle file')
     parser.add_argument('--save_best_sample', action='store_true', help='Enable saving sample of preference profile from best parameters to CSV')
     parser.add_argument('--exp_name', type=str, default=None, help='Name of experiment for logging!')
+    parser.add_argument('--loss_top_p', type=int, nargs='+', default=None,
+                         help='Which top-p ranks to include in the EM loss (e.g. --loss_top_p 1 2 3). '
+                              'Requires --max_p to be set explicitly. Default: all available top-p up to --max_p.')
+    parser.add_argument('--loss_exclude_unmatched', action='store_true',
+                         help='Exclude the unmatched-rate term from the EM loss (included by default).')
     args = parser.parse_args()
-    
-    
+
+
     run_chilean_data_experiment(
         outfile=args.outfile,
         max_iter=args.max_iter,
@@ -173,4 +199,6 @@ if __name__ == "__main__":
         max_p=args.max_p,
         imputation_file=args.imputation_file,
         exp_name=args.exp_name,
+        loss_top_p=args.loss_top_p,
+        loss_include_unmatched=not args.loss_exclude_unmatched,
     )
