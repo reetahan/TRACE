@@ -15,18 +15,13 @@ import json
 
 
 def _loss_label(loss_top_p, loss_include_unmatched):
-    """Short, unambiguous token for the loss metric selection, embedded in
-    the outfile name so it's visible without opening the log -- redundant
-    with (and independently derived from) the 'Loss metrics used:' line
-    EM_algorithm prints, on purpose: two independent places recording the
-    same fact so a slip in one doesn't silently go unnoticed."""
     if loss_top_p is None:
         base = "allTopP"
     elif loss_top_p:
         base = "top" + "-".join(str(p) for p in loss_top_p)
     else:
-        base = "none"
-    return base + ("+unm" if loss_include_unmatched else "")
+        base = "unmatchedOnly"
+    return base + ("+unm" if loss_include_unmatched and loss_top_p != [] else "")
 
 
 def run_chilean_data_experiment(
@@ -176,12 +171,22 @@ if __name__ == "__main__":
     parser.add_argument('--save_params', action='store_true', help='Enable saving of parameters to a pickle file')
     parser.add_argument('--save_best_sample', action='store_true', help='Enable saving sample of preference profile from best parameters to CSV')
     parser.add_argument('--exp_name', type=str, default=None, help='Name of experiment for logging!')
-    parser.add_argument('--loss_top_p', type=int, nargs='+', default=None,
+    loss_top_p_group = parser.add_mutually_exclusive_group()
+    loss_top_p_group.add_argument('--loss_top_p', type=int, nargs='+', default=None,
                          help='Which top-p ranks to include in the EM loss (e.g. --loss_top_p 1 2 3). '
                               'Requires --max_p to be set explicitly. Default: all available top-p up to --max_p.')
+    loss_top_p_group.add_argument('--loss_unmatched_only', action='store_true',
+                         help='Use only the unmatched rate in the EM loss, no top-p ranks at all '
+                              '(argparse cannot express --loss_top_p as an empty list, so this is the '
+                              'dedicated flag for that case). Requires --max_p to be set explicitly. '
+                              'Mutually exclusive with --loss_top_p.')
     parser.add_argument('--loss_exclude_unmatched', action='store_true',
                          help='Exclude the unmatched-rate term from the EM loss (included by default).')
     args = parser.parse_args()
+
+    if args.loss_unmatched_only and args.loss_exclude_unmatched:
+        parser.error('--loss_unmatched_only and --loss_exclude_unmatched together would leave the EM loss empty.')
+    loss_top_p = [] if args.loss_unmatched_only else args.loss_top_p
 
 
     run_chilean_data_experiment(
@@ -199,6 +204,6 @@ if __name__ == "__main__":
         max_p=args.max_p,
         imputation_file=args.imputation_file,
         exp_name=args.exp_name,
-        loss_top_p=args.loss_top_p,
+        loss_top_p=loss_top_p,
         loss_include_unmatched=not args.loss_exclude_unmatched,
     )

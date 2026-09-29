@@ -182,6 +182,12 @@ def nyc_preprocess_data(df, match_stats_df, school_info_df, addtl_school_info_df
     return df, match_stats_df, school_info_df
 
 def preprocess_chilean_data(indv_df, match_df, school_cap_df, is_province_level=False):
+    indv_df = indv_df.copy()
+    school_cap_df = school_cap_df.copy()
+    for _df in (indv_df, school_cap_df):
+        for col in ('rbd', 'program_code'):
+            if col in _df.columns:
+                _df[col] = _df[col].astype(str).str.replace(r'\.0$', '', regex=True)
 
     if(is_province_level):
         subdivision_col = "Provincia"
