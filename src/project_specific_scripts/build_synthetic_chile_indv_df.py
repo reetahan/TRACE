@@ -1,42 +1,4 @@
-"""
-Splice step: build a synthetic Chile individual-level dataframe (the exact
-schema chilean_real_welfare_comparison.py / chile_lottery_decile_stb_mtb.py /
-chile_region_cumulative_stb_mtb.py expect via --individual) from a saved
-Mixture-of-Mallows params.pkl, instead of real observed preferences.
 
-Preference lists come from the fitted Mallows mixture. Everything the DA
-mechanism also needs -- priority flags -- is synthesized by the repo's own
-chile_priority_attributes.prepare_chile_numba_inputs_from_rankings(), using
-priority-tier base rates estimated from the real data you point it at. That
-keeps every downstream figure script working unmodified: it only ever sees
-an --individual file, real or synthetic.
-
-List lengths are drawn from the empirical per-student list-length
-distribution of the real data (list_length.return_chilean_list_params +
-sample_empirical_lengths), not a fixed truncation, so a synthetic run
-reflects the same list-length spread as the real cohort.
-
-'female' is not part of the priority-simulation pipeline (nothing in the
-Chile synthetic-data code models it), so it's drawn i.i.d. per student from
-the real data's empirical female rate. Region is the same value as the
-Mallows "district" the student was sampled into (Chile's EM pipeline treats
-district and Region as identical -- see district_to_region in
-chilean_experiment_driver.py).
-
-Usage:
-    python build_synthetic_chile_indv_df.py \
-        --params_pkl run_params.pkl \
-        --real_individual real_indv_df.csv \
-        --capacity real_capacity_df.csv \
-        --output synthetic_indv_df.csv \
-        --seed 42
-
-    # Restrict to one district instead of the whole population:
-    python build_synthetic_chile_indv_df.py \
-        --params_pkl run_params.pkl --real_individual real_indv_df.csv \
-        --capacity real_capacity_df.csv --district Santiago --n_students 5000 \
-        --output synthetic_indv_df.csv
-"""
 
 import argparse
 import pickle
@@ -147,6 +109,116 @@ def sample_district_rankings(params, district, n_students, empirical_probs, rng,
     return rankings, lengths
 
 
+def build_synthetic_indv_df(
+    params: dict,
+    real_indv_df: pd.DataFrame,
+    capacity_df: pd.DataFrame,
+    rng: np.random.Generator,
+    subdivision_col: str = 'Region',
+    district: str = None,
+    n_students: int = None,
+    total_students: int = None,
+    n_jobs: int = 1,
+    verbose: bool = True,
+) -> pd.DataFrame:
+    """
+    Draw ONE fresh synthetic individual-level dataframe from a fitted Mallows
+    mixture, in the exact schema chilean_real_welfare_comparison.py /
+    chile_lottery_decile_stb_mtb.py / chile_region_cumulative_stb_mtb.py
+    expect via --individual.
+
+    Calibration (list lengths, female rate, priority-flag base rates, and
+    per-district population shares) comes from real_indv_df and is fixed;
+    only the preference lists -- and the priority-attribute simulation that
+    depends on them -- are freshly sampled from `params` using `rng`. Calling
+    this repeatedly with fresh rng state (rather than reusing one fixed
+    output CSV) gives independent replicates suitable for a CI that captures
+    preference-sampling randomness, not just lottery tie-break randomness.
+    """
+    list_length_params = return_chilean_list_params(real_indv_df)
+    empirical_probs = list_length_params['list_length_empirical_probs']
+    female_rate = real_indv_df.drop_duplicates('mrun')['female'].mean()
+    calibration = estimate_priority_calibration(real_indv_df)
+    if verbose:
+        print(f"  Empirical list lengths: {sorted(empirical_probs.items())}")
+        print(f"  Female rate: {female_rate:.3f}")
+        print(f"  Priority calibration: {calibration}")
+
+    if district is not None:
+        if n_students is None:
+            raise ValueError('n_students is required when district is given.')
+        district_counts = {district: n_students}
+    else:
+        real_counts = real_indv_df.drop_duplicates('mrun')[subdivision_col].value_counts()
+        total = total_students or int(real_counts.sum())
+        fit_districts = [d for d in params['districts'] if d in real_counts.index]
+        missing = set(params['districts']) - set(fit_districts)
+        if missing and verbose:
+            print(f"  Note: {len(missing)} district(s) in params have no match in "
+                  f"real_indv_df's '{subdivision_col}' column, skipping: {sorted(missing)[:5]}...")
+        if not fit_districts:
+            raise ValueError(
+                f"None of the {len(params['districts'])} district(s) in params match any value "
+                f"in real_indv_df's '{subdivision_col}' column. This usually means the params were "
+                f"fit against a different subdivision (e.g. 'Provincia' vs 'Region') -- pass the "
+                f"matching subdivision_col. Sample params district keys: {sorted(params['districts'])[:5]}. "
+                f"Sample '{subdivision_col}' values in real_indv_df: {sorted(real_counts.index)[:5]}."
+            )
+        shares = real_counts.loc[fit_districts] / real_counts.loc[fit_districts].sum()
+        district_counts = {d: max(1, int(round(total * shares[d]))) for d in fit_districts}
+
+    if verbose:
+        print(f"Sampling {sum(district_counts.values()):,} students across {len(district_counts)} district(s)...")
+
+    all_rankings, all_districts, all_lengths = [], [], []
+    for d, n in district_counts.items():
+        if verbose:
+            print(f"  {d}: {n:,} students...")
+        rankings, lengths = sample_district_rankings(params, d, n, empirical_probs, rng, n_jobs=n_jobs)
+        all_rankings.extend(rankings)
+        all_districts.extend([d] * n)
+        all_lengths.extend(lengths.tolist())
+
+    if verbose:
+        print("Synthesizing priority attributes for sampled rankings...")
+    prepared = prepare_chile_numba_inputs_from_rankings(
+        truncated_rankings=all_rankings,
+        capacity_rows=capacity_df,
+        seed=int(rng.integers(2**32)),
+        calibration=calibration,
+    )
+    app = prepared['application_table'][['mrun', 'rbd', 'preference_number'] + PRIORITY_COLS].copy()
+
+    # mrun assigned as "0", "1", ... in the order of all_rankings -- same order as all_districts.
+    district_by_mrun = {str(i): d for i, d in enumerate(all_districts)}
+    if subdivision_col == 'Provincia':
+        region_by_mrun = {mrun: provincia_to_region(d) for mrun, d in district_by_mrun.items()}
+    elif subdivision_col == 'Region':
+        region_by_mrun = district_by_mrun
+    else:
+        raise ValueError(
+            f"Don't know how to derive 'Region' from subdivision_col={subdivision_col!r}; "
+            "extend provincia_to_region() or add a matching case here."
+        )
+    app['Region'] = app['mrun'].map(region_by_mrun)
+
+    unique_mruns = app['mrun'].unique()
+    female_by_mrun = pd.Series(
+        (rng.random(len(unique_mruns)) < female_rate).astype(int), index=unique_mruns
+    )
+    app['female'] = app['mrun'].map(female_by_mrun)
+
+    split = app['rbd'].str.rsplit('_', n=1, expand=True)
+    app['rbd'] = split[0]
+    app['program_code'] = split[1]
+
+    out = app[['mrun', 'rbd', 'program_code', 'preference_number', 'female', 'Region'] + PRIORITY_COLS]
+    if verbose:
+        achieved_lengths = pd.Series(all_lengths)
+        print(f"\nAchieved list-length distribution:\n{achieved_lengths.value_counts(normalize=True).sort_index()}")
+    return out
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--params_pkl', required=True)
@@ -179,96 +251,25 @@ def main():
     real_indv_df = load_df(args.real_individual)
     capacity_df = load_df(args.capacity)
 
-    list_length_params = return_chilean_list_params(real_indv_df)
-    empirical_probs = list_length_params['list_length_empirical_probs']
-    print(f"  Empirical list lengths: {sorted(empirical_probs.items())}")
-
-    female_rate = real_indv_df.drop_duplicates('mrun')['female'].mean()
-    print(f"  Female rate: {female_rate:.3f}")
-
-    calibration = estimate_priority_calibration(real_indv_df)
-    print(f"  Priority calibration: {calibration}")
-
     with open(args.params_pkl, 'rb') as f:
         params = pickle.load(f)
 
     rng = np.random.default_rng(args.seed)
 
-    if args.district is not None:
-        district_counts = {args.district: args.n_students}
-    else:
-        real_counts = real_indv_df.drop_duplicates('mrun')[args.subdivision_col].value_counts()
-        total = args.total_students or int(real_counts.sum())
-        fit_districts = [d for d in params['districts'] if d in real_counts.index]
-        missing = set(params['districts']) - set(fit_districts)
-        if missing:
-            print(f"  Note: {len(missing)} district(s) in params have no match in "
-                  f"--real_individual's '{args.subdivision_col}' column, skipping: {sorted(missing)[:5]}...")
-        if not fit_districts:
-            raise ValueError(
-                f"None of the {len(params['districts'])} district(s) in --params_pkl match any value "
-                f"in --real_individual's '{args.subdivision_col}' column. This usually means the params "
-                f"were fit against a different subdivision (e.g. 'Provincia' vs 'Region') -- pass the "
-                f"matching --subdivision_col. Sample params district keys: {sorted(params['districts'])[:5]}. "
-                f"Sample '{args.subdivision_col}' values in --real_individual: {sorted(real_counts.index)[:5]}."
-            )
-        shares = real_counts.loc[fit_districts] / real_counts.loc[fit_districts].sum()
-        district_counts = {d: max(1, int(round(total * shares[d]))) for d in fit_districts}
-
-    print(f"Sampling {sum(district_counts.values()):,} students across {len(district_counts)} district(s)...")
-
-    all_rankings = []
-    all_districts = []
-    all_lengths = []
-    for district, n in district_counts.items():
-        print(f"  {district}: {n:,} students...")
-        rankings, lengths = sample_district_rankings(
-            params, district, n, empirical_probs, rng, n_jobs=args.n_jobs
-        )
-        all_rankings.extend(rankings)
-        all_districts.extend([district] * n)
-        all_lengths.extend(lengths.tolist())
-
-    print("Synthesizing priority attributes for sampled rankings...")
-    prepared = prepare_chile_numba_inputs_from_rankings(
-        truncated_rankings=all_rankings,
-        capacity_rows=capacity_df,
-        seed=int(rng.integers(2**32)),
-        calibration=calibration,
+    out = build_synthetic_indv_df(
+        params, real_indv_df, capacity_df, rng,
+        subdivision_col=args.subdivision_col, district=args.district,
+        n_students=args.n_students, total_students=args.total_students,
+        n_jobs=args.n_jobs, verbose=True,
     )
-    app = prepared['application_table'][['mrun', 'rbd', 'preference_number'] + PRIORITY_COLS].copy()
-
-    # mrun assigned as "0", "1", ... in the order of all_rankings -- same order as all_districts.
-    district_by_mrun = {str(i): d for i, d in enumerate(all_districts)}
-    if args.subdivision_col == 'Provincia':
-        region_by_mrun = {mrun: provincia_to_region(d) for mrun, d in district_by_mrun.items()}
-    elif args.subdivision_col == 'Region':
-        region_by_mrun = district_by_mrun
-    else:
-        raise ValueError(
-            f"Don't know how to derive 'Region' from --subdivision_col={args.subdivision_col!r}; "
-            "extend provincia_to_region() or add a matching case here."
-        )
-    app['Region'] = app['mrun'].map(region_by_mrun)
-
-    unique_mruns = app['mrun'].unique()
-    female_by_mrun = pd.Series(
-        (rng.random(len(unique_mruns)) < female_rate).astype(int), index=unique_mruns
-    )
-    app['female'] = app['mrun'].map(female_by_mrun)
-
-    split = app['rbd'].str.rsplit('_', n=1, expand=True)
-    app['rbd'] = split[0]
-    app['program_code'] = split[1]
-
-    out = app[['mrun', 'rbd', 'program_code', 'preference_number', 'female', 'Region'] + PRIORITY_COLS]
     out.to_csv(args.output, index=False)
 
-    achieved_lengths = pd.Series(all_lengths)
-    print(f"\nAchieved list-length distribution:\n{achieved_lengths.value_counts(normalize=True).sort_index()}")
     print(f"\nSaved {out['mrun'].nunique():,} students ({len(out):,} application rows) to {args.output}")
     print("This file can be passed directly as --individual to the Fig 4/6/8 scripts, "
-          "alongside the same real --capacity file.")
+          "alongside the same real --capacity file. Those scripts can also take --params_pkl/"
+          "--real_individual directly instead of a pre-built --individual file, resampling a "
+          "fresh synthetic replicate (like this one) each run for a CI that also captures "
+          "preference-sampling randomness, not just the lottery.")
 
 
 if __name__ == '__main__':

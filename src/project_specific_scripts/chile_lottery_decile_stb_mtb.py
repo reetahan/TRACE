@@ -1,28 +1,7 @@
-"""
-Fig. 4 style plot: Top-1, Top-5, and Unmatched rates by lottery decile,
-under STB and MTB, for real Chilean preference/priority data.
 
-Decile definition:
-  - STB: students are bucketed by their single lottery draw (shared across
-    every school they applied to).
-  - MTB: students are bucketed by their *best* (lowest) per-school lottery
-    draw among their top-5 listed preferences -- i.e. their most favorable
-    relative lottery position across the schools they actually ranked
-    highest.
-
-Both conditions are averaged over --n_runs independent lottery draws.
-Reuses the DA/priority machinery from chilean_real_welfare_comparison.py.
-
-Usage:
-    python chile_lottery_decile_stb_mtb.py \
-        --individual <path_to_indv_df> \
-        --capacity   <path_to_capacity_df> \
-        --n_runs 10 \
-        --output fig4_chile_lottery_decile.png \
-        --seed 42
-"""
 
 import argparse
+import pickle
 import sys
 from pathlib import Path
 
@@ -43,19 +22,53 @@ from chilean_real_welfare_comparison import (
 N_DECILES = 10
 
 
-def compute_student_records(student_ids, student_rankings, matches, lottery_df, decile_source):
+def compute_student_records(student_ids, student_rankings, matches, lottery_df, decile_source, topk=5):
     """
     Per-student matched/rank_pos, plus the scalar used for decile bucketing.
-    decile_source: 'single'    -> STB, one shared lottery value per student
-                   'best_top5' -> MTB, min lottery among preference_number<=5
     """
     if decile_source == 'single':
         decile_val = lottery_df.drop_duplicates('student_idx').set_index('student_idx')['lottery']
-    else:
+    elif decile_source == 'min_topk':
         decile_val = (
-            lottery_df[lottery_df['preference_number'] <= 5]
+            lottery_df[lottery_df['preference_number'] <= topk]
             .groupby('student_idx')['lottery'].min()
         )
+    elif decile_source == 'median_topk':
+        decile_val = (
+            lottery_df[lottery_df['preference_number'] <= topk]
+            .groupby('student_idx')['lottery'].median()
+        )
+    elif decile_source == 'mean_topk':
+        decile_val = (
+            lottery_df[lottery_df['preference_number'] <= topk]
+            .groupby('student_idx')['lottery'].mean()
+        )
+    elif decile_source == 'rank_weighted_topk':
+        topk_df = lottery_df[lottery_df['preference_number'] <= topk].copy()
+        topk_df['weight'] = 1.0 / topk_df['preference_number']
+        topk_df['weighted_lottery'] = topk_df['lottery'] * topk_df['weight']
+        grouped = topk_df.groupby('student_idx')
+        decile_val = grouped['weighted_lottery'].sum() / grouped['weight'].sum()
+    elif decile_source == 'first_choice':
+        decile_val = (
+            lottery_df.sort_values(['student_idx', 'preference_number'])
+            .groupby('student_idx').first()['lottery']
+        )
+    elif decile_source == 'matched_school':
+        matched_df = pd.DataFrame({
+            'student_idx': np.arange(len(student_ids)),
+            'school_idx': np.asarray(matches).astype(int),
+        })
+        lookup = lottery_df.drop_duplicates(subset=['student_idx', 'school_idx'], keep='first')
+        merged = matched_df.merge(
+            lookup[['student_idx', 'school_idx', 'lottery']],
+            on=['student_idx', 'school_idx'], how='left',
+        )
+        decile_val = merged.set_index('student_idx')['lottery']
+        worst_fallback = lottery_df.groupby('student_idx')['lottery'].min()
+        decile_val = decile_val.fillna(worst_fallback)
+    else:
+        raise ValueError(f"Unknown decile_source: {decile_source!r}")
 
     records = []
     for i, sid in enumerate(student_ids):
@@ -93,29 +106,148 @@ def decile_metrics(df):
     return pd.DataFrame(rows).set_index('decile')
 
 
+def plot_decile_value_distributions(stb_vals, mtb_vals, output_path):
+    """
+    Diagnostic plot, regenerated every run regardless of which aggregation
+    MTB's decile currently uses: overlaid histograms of the raw, pre-qcut
+    scalar each condition's decile is built from (STB's single draw; MTB's
+    whatever-the-current-aggregation-is), pooled across all replicates
+    """
+    fig, ax = plt.subplots(figsize=(9, 5))
+    bins = np.linspace(
+        min(stb_vals.min(), mtb_vals.min()),
+        max(stb_vals.max(), mtb_vals.max()),
+        80,
+    )
+    ax.hist(stb_vals, bins=bins, density=True, alpha=0.45, color='#1565C0', label='STB (single draw)')
+    ax.hist(mtb_vals, bins=bins, density=True, alpha=0.45, color='#AD1457', label='MTB (current aggregation)')
+
+    for vals, color in [(stb_vals, '#1565C0'), (mtb_vals, '#AD1457')]:
+        boundaries = np.quantile(vals, np.arange(1, N_DECILES) / N_DECILES)
+        for b in boundaries:
+            ax.axvline(b, color=color, linewidth=0.6, alpha=0.5, linestyle=':')
+
+    ax.set_xlabel('Decile-defining value (raw, pre-qcut)', fontsize=12)
+    ax.set_ylabel('Density', fontsize=12)
+    ax.set_title('STB vs MTB: distribution of the value each condition is decile-bucketed by\n'
+                 '(dotted lines = the 9 decile boundaries actually used for that condition)', fontsize=10)
+    ax.legend(fontsize=10)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=200, bbox_inches='tight')
+    plt.close(fig)
+    print(f"Saved: {output_path}")
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--individual', required=True)
+    parser.add_argument('--individual', default=None,
+                         help='Fixed --individual CSV (real or a pre-built synthetic one). Mutually '
+                              'exclusive with --params_pkl; when given, only the lottery is redrawn '
+                              'each replicate (preferences stay fixed).')
+    parser.add_argument('--params_pkl', default=None,
+                         help='Fitted Mallows params.pkl. When given (with --real_individual), each '
+                              'replicate draws a FRESH synthetic preference sample AND a fresh lottery, '
+                              'together -- the CI then reflects both preference-sampling and lottery '
+                              'randomness, not just the lottery. Mutually exclusive with --individual.')
+    parser.add_argument('--real_individual', default=None,
+                         help='Real indv_df, used with --params_pkl to calibrate synthetic resampling.')
+    parser.add_argument('--subdivision_col', default='Region',
+                         help="Only used with --params_pkl: 'Region' or 'Provincia', matching how the "
+                              "saved params were fit.")
     parser.add_argument('--capacity', required=True)
     parser.add_argument('--n_runs', type=int, default=10,
-                         help='Independent lottery draws averaged per condition.')
-    parser.add_argument('--output', default='fig4_chile_lottery_decile.png')
+                         help='Independent replicates averaged per condition. With --individual, only '
+                              'the lottery is redrawn each replicate; with --params_pkl, preferences are '
+                              'also freshly resampled each replicate.')
+    parser.add_argument('--mtb_decile_agg',
+                         choices=['min', 'median', 'mean', 'rank_weighted_avg', 'first_choice', 'matched_school'],
+                         default='rank_weighted_avg',
+                         help="How to collapse a student's per-school MTB lottery draws into the single "
+                              "scalar their decile is built from. 'min'/'median'/'mean'/'rank_weighted_avg' "
+                              "aggregate over their top --mtb_decile_topk listed preferences (order "
+                              "statistic / order statistic / CLT-concentrated / rank-weighted-CLT-"
+                              "concentrated, respectively.")
+    parser.add_argument('--mtb_decile_topk', type=int, default=5,
+                         help="Number of top-ranked preferences to aggregate over for the min/median/mean/"
+                              "rank_weighted_avg aggregations (default 5). Lower it (e.g. 2 or 3) for a "
+                              "milder version of min/mean's distributional distortion. Ignored by "
+                              "first_choice and matched_school.")
+    parser.add_argument('--output', default=None,
+                         help='Defaults to fig4_chile_lottery_decile_<agg tag>.png, so switching '
+                              '--mtb_decile_agg/--mtb_decile_topk does not silently overwrite another '
+                              "method's plot.")
+    parser.add_argument('--output_dist', default=None,
+                         help='Diagnostic plot comparing the raw distribution STB vs MTB deciles are built '
+                              'from. Defaults to fig4_decile_value_distributions_<agg tag>.png.')
     parser.add_argument('--seed', type=int, default=DATA_GENERATION_SEED)
     args = parser.parse_args()
 
+    AGG_TO_SOURCE = {
+        'min': 'min_topk',
+        'median': 'median_topk',
+        'mean': 'mean_topk',
+        'rank_weighted_avg': 'rank_weighted_topk',
+        'first_choice': 'first_choice',
+        'matched_school': 'matched_school',
+    }
+    mtb_decile_source = AGG_TO_SOURCE[args.mtb_decile_agg]
+    uses_topk = mtb_decile_source.endswith('_topk')
+    agg_tag = f'{args.mtb_decile_agg}_k{args.mtb_decile_topk}' if uses_topk else args.mtb_decile_agg
+
+    if args.output is None:
+        args.output = f'fig4_chile_lottery_decile_{agg_tag}.png'
+    if args.output_dist is None:
+        args.output_dist = f'fig4_decile_value_distributions_{agg_tag}.png'
+
+    if bool(args.individual) == bool(args.params_pkl):
+        parser.error('Pass exactly one of --individual or --params_pkl.')
+    if args.params_pkl and not args.real_individual:
+        parser.error('--params_pkl requires --real_individual (for calibration).')
+
     print("Loading data...")
-    indv_df = load_df(args.individual)
     capacity_df = load_df(args.capacity)
-    applications_long = build_applications_long(indv_df)
-    school_table = _prepare_school_capacity_table(capacity_df)
-    all_student_ids = sorted(applications_long['mrun'].unique().tolist())
-    print(f"  Students: {len(all_student_ids):,}   Schools: {len(school_table):,}")
+    school_table = _prepare_school_capacity_table(capacity_df)  # capacities are always real, never synthetic
+
+    if args.individual:
+        fixed_indv_df = load_df(args.individual)
+        mallows_params = None
+        real_indv_df_for_calibration = None
+    else:
+        fixed_indv_df = None
+        real_indv_df_for_calibration = load_df(args.real_individual)
+        with open(args.params_pkl, 'rb') as f:
+            mallows_params = pickle.load(f)
+
+    def get_indv_df_for_replicate(rng):
+        if fixed_indv_df is not None:
+            return fixed_indv_df
+        from build_synthetic_chile_indv_df import build_synthetic_indv_df
+        return build_synthetic_indv_df(
+            mallows_params, real_indv_df_for_calibration, capacity_df, rng,
+            subdivision_col=args.subdivision_col, n_jobs=1, verbose=False,
+        )
+
+    print(f"  Schools: {len(school_table):,}")
+    print(f"  Mode: {'fixed --individual, lottery-only CI' if fixed_indv_df is not None else 'resampling preferences + lottery each replicate'}")
+    topk_note = f", topk={args.mtb_decile_topk}" if uses_topk else ""
+    print(f"  MTB decile aggregation: {args.mtb_decile_agg} ({mtb_decile_source}{topk_note})")
+    print(f"  Output: {args.output}")
+    print(f"  Output (distribution diagnostic): {args.output_dist}")
 
     rng = np.random.default_rng(args.seed)
 
     metrics_by_condition = {'STB': [], 'MTB': []}
+    decile_value_pool = {'STB': [], 'MTB': []}  # raw pre-qcut scalars, pooled across replicates,
+                                                 # for the distribution-comparison plot below
     for run in range(args.n_runs):
         print(f"Run {run + 1}/{args.n_runs}...")
+        indv_df = get_indv_df_for_replicate(rng)
+        applications_long = build_applications_long(indv_df)
+        all_student_ids = sorted(applications_long['mrun'].unique().tolist())
+        if run == 0:
+            print(f"  Students: {len(all_student_ids):,}")
 
         student_lottery = {sid: float(rng.random()) for sid in all_student_ids}
         student_ids, rankings, matches, lottery_df = run_matching(
@@ -124,18 +256,59 @@ def main():
         )
         df = compute_student_records(student_ids, rankings, matches, lottery_df, 'single')
         metrics_by_condition['STB'].append(decile_metrics(df))
+        decile_value_pool['STB'].append(df['decile_val'].to_numpy())
 
         student_ids, rankings, matches, lottery_df = run_matching(
             applications_long, school_table, rng,
             student_lottery=None, return_lottery_df=True,
         )
-        df = compute_student_records(student_ids, rankings, matches, lottery_df, 'best_top5')
+        df = compute_student_records(student_ids, rankings, matches, lottery_df, mtb_decile_source,
+                                      topk=args.mtb_decile_topk)
         metrics_by_condition['MTB'].append(decile_metrics(df))
+        decile_value_pool['MTB'].append(df['decile_val'].to_numpy())
 
-    avg = {
-        cond: pd.concat(metrics_by_condition[cond]).groupby(level=0).mean()
-        for cond in ['STB', 'MTB']
-    }
+    # 95% CI (normal approx, 1.96*SE) on the mean across the n_runs lottery
+    # draws -- holding the real observed preference data fixed, this answers
+    # "how much would this estimate move if the lottery were redrawn."
+    stats = {}
+    for cond in ['STB', 'MTB']:
+        grouped = pd.concat(metrics_by_condition[cond]).groupby(level=0)
+        mean = grouped.mean()
+        std = grouped.std()
+        stats[cond] = {'mean': mean, 'ci95': 1.96 * std / np.sqrt(args.n_runs)}
+
+    plot_decile_value_distributions(
+        np.concatenate(decile_value_pool['STB']),
+        np.concatenate(decile_value_pool['MTB']),
+        args.output_dist,
+    )
+
+    print("\nCI half-width (95%, pp) across deciles -- if these are all near-zero,")
+    print("the shaded bands are legitimately too thin to see at this scale, not a bug:")
+    for cond in ['STB', 'MTB']:
+        for metric in ['pct_unmatched', 'top1_pct', 'top5_pct']:
+            ci_series = stats[cond]['ci95'][metric]
+            print(f"  {cond:>3} {metric:>13}: min={ci_series.min():.3f}pp  "
+                  f"max={ci_series.max():.3f}pp  mean={ci_series.mean():.3f}pp")
+
+    # Per-decile STB-vs-MTB significance check -- answers "is this crossing/
+    # gap real or noise" directly as a number instead of by eyeballing two
+    # thin, likely-imperceptible shaded bands on the plot. diff_ci95 is the
+    # 95% CI on the DIFFERENCE itself (combining both sides' independent
+    # variance: sqrt(se_stb^2 + se_mtb^2)); '*' marks deciles where the STB-MTB
+    # gap exceeds that CI, i.e. is distinguishable from noise at this n_runs.
+    print("\nSTB - MTB gap per decile, with 95% CI on the DIFFERENCE ('*' = exceeds CI, real not noise):")
+    for metric in ['pct_unmatched', 'top1_pct', 'top5_pct']:
+        print(f"  {metric}:")
+        for d in range(1, N_DECILES + 1):
+            stb_mean = stats['STB']['mean'][metric].get(d, float('nan'))
+            mtb_mean = stats['MTB']['mean'][metric].get(d, float('nan'))
+            diff = stb_mean - mtb_mean
+            diff_ci = float(np.sqrt(stats['STB']['ci95'][metric].get(d, 0) ** 2
+                                     + stats['MTB']['ci95'][metric].get(d, 0) ** 2))
+            flag = '*' if abs(diff) > diff_ci else ' '
+            print(f"    decile {d:>2}: STB={stb_mean:6.2f}%  MTB={mtb_mean:6.2f}%  "
+                  f"diff={diff:+6.2f}pp  ci95={diff_ci:5.2f}pp {flag}")
 
     # ── plot ──────────────────────────────────────────────────────────────
     COLORS = {'pct_unmatched': '#111111', 'top1_pct': '#1565C0', 'top5_pct': '#AD1457'}
@@ -147,14 +320,24 @@ def main():
     fig, ax = plt.subplots(figsize=(7, 5))
     for cond in ['STB', 'MTB']:
         for metric in ['pct_unmatched', 'top1_pct', 'top5_pct']:
-            ax.plot(deciles, avg[cond][metric].reindex(deciles), color=COLORS[metric],
+            mean_vals = stats[cond]['mean'][metric].reindex(deciles)
+            ci_vals = stats[cond]['ci95'][metric].reindex(deciles)
+            ax.plot(deciles, mean_vals, color=COLORS[metric],
                     linestyle=STYLES[cond], marker=MARKERS[metric], markersize=6,
                     linewidth=1.8, label=f'{LABELS[metric]} ({cond})')
+            ax.fill_between(deciles, mean_vals - ci_vals, mean_vals + ci_vals,
+                             color=COLORS[metric], alpha=0.28,
+                             edgecolor=COLORS[metric], linewidth=0.8)
 
     ax.set_xlabel('Lottery Decile', fontsize=12)
     ax.set_ylabel('Match Rate (%)', fontsize=12)
     ax.set_xticks(deciles)
-    ax.set_ylim(0, 100)
+    # Autoscale to the actual data range (mean lines + CI bands) instead of a
+    # fixed 0-100 -- the CI half-widths here are ~0.2-0.4pp, which render as
+    # nothing on a 100-unit axis; zooming to the real spread makes them
+    # visible without exaggerating their true size. margins() adds a little
+    # breathing room above/below rather than cropping tight to the data.
+    ax.margins(y=0.08)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 

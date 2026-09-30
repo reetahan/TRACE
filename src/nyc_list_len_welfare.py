@@ -235,6 +235,30 @@ def run_matching(
     return agg, truncated_rankings, rankings_as_indices, matches_idx, student_attrs
 
 
+def _baseline_cohort_stats_by_group(cohort_df: pd.DataFrame, group_col: str) -> pd.DataFrame:
+    """
+    Same idea as the Overall avg_rank_baseline_cohort in run_sweep, but broken
+    out per group (borough / lottery_decile): restrict to students who were
+    matched at the baseline (smallest) min_length -- a fixed cohort per group,
+    since group membership itself (which borough/decile a student is in)
+    doesn't change across min_length -- then compute avg_rank over that fixed
+    group at the current min_length. Returns one row per group value with
+    columns [group_col, avg_rank_baseline_cohort, pct_baseline_cohort_matched,
+    top3_baseline_cohort], suitable for merging onto the per-(p, group) sweep
+    rows on group_col (broadcasting the same value across every p).
+    """
+    rows = []
+    for val, g in cohort_df.groupby(group_col, observed=True):
+        s = _rank_stats(g['match_rank'])
+        rows.append({
+            group_col: val,
+            'avg_rank_baseline_cohort':    round(s['avg_rank'], 4),
+            'pct_baseline_cohort_matched': round(100 * g['matched'].mean(), 4),
+            'top3_baseline_cohort':        round(100 * g['match_rank'].le(3).fillna(False).mean(), 4),
+        })
+    return pd.DataFrame(rows)
+
+
 def run_sweep(params, lottery, df, match_stats_df, school_info_df,
               priority_config, district_to_borough,
               min_lengths, output_dir, seed, n_jobs, save_ranking=False):
@@ -384,6 +408,8 @@ def run_sweep(params, lottery, df, match_stats_df, school_info_df,
         # Unconditional over the cohort (unmatched counts as not-top-3), same
         # convention as top_p_pct elsewhere (welfare.py's _top_p_flag).
         cohort_top3_pct = 100 * cohort_df['match_rank'].le(3).fillna(False).mean()
+        borough_cohort_stats = _baseline_cohort_stats_by_group(cohort_df, 'borough')
+        lottery_cohort_stats = _baseline_cohort_stats_by_group(cohort_df, 'lottery_decile')
 
         print(f"  pct_matched: {stats['pct_matched']:.2f}%")
         print(f"  avg_rank:    {stats['avg_rank']:.3f}")
@@ -409,12 +435,14 @@ def run_sweep(params, lottery, df, match_stats_df, school_info_df,
         if borough_sweep is not None:
             borough_sweep = borough_sweep.copy()
             borough_sweep['list_length_min'] = min_len
+            borough_sweep = borough_sweep.merge(borough_cohort_stats, on='borough', how='left')
             borough_rows.append(borough_sweep)
-        
+
         lottery_sweep = welfare_results.top_p_sweep_by_category.get('lottery_decile')
         if lottery_sweep is not None:
             lottery_sweep = lottery_sweep.copy()
             lottery_sweep['list_length_min'] = min_len
+            lottery_sweep = lottery_sweep.merge(lottery_cohort_stats, on='lottery_decile', how='left')
             lottery_rows.append(lottery_sweep)
 
     lottery_df = pd.concat(lottery_rows, ignore_index=True) if lottery_rows else None

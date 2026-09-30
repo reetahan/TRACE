@@ -1,14 +1,18 @@
 """
 plot_chile_welfare.py
 
-Compares welfare under MTB (real lottery) vs STB (counterfactual) for:
+Compares welfare under MTB vs STB for:
   - All students
   - Female students
   - Non-female students
 
 Uses real individual-level Chilean preference data (indv_df).
 Preference lists and priority attributes are fixed and real.
-Only the lottery mechanism changes between MTB and STB.
+Only the lottery mechanism changes between MTB and STB, and both are
+averaged over --n_stb_runs independent lottery draws (95% CI shown as a
+shaded band / error bars) -- the interval reflects uncertainty from the
+lottery's own randomness, holding real preferences fixed, not sampling
+uncertainty about the student population.
 
 Usage:
     python plot_chile_welfare.py \
@@ -17,11 +21,15 @@ Usage:
         --output_uncond welfare_uncond.png \
         --output_cond   welfare_cond.png \
         --n_stb_runs 10 \
-        --max_p      12 \
+        --max_p      10 \
         --seed       42
 """
 
 import argparse
+import pickle
+import sys
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -163,8 +171,25 @@ def compute_top_p_curves(
 
 
 def aggregate_runs(curve_list: List[pd.Series]) -> pd.DataFrame:
+    """
+    mean/std/ci95 across independent lottery-draw runs, holding real
+    preference data fixed. ci95 is the normal-approximation 95% CI
+    half-width on the mean (1.96 * std/sqrt(n)) -- it answers "how much
+    would this estimate move if the lottery were redrawn", not sampling
+    uncertainty about the student population or model uncertainty.
+    """
     df = pd.concat(curve_list, axis=1)
-    return pd.DataFrame({'mean': df.mean(axis=1), 'std': df.std(axis=1)})
+    n = df.shape[1]
+    std = df.std(axis=1)
+    return pd.DataFrame({'mean': df.mean(axis=1), 'std': std, 'ci95': 1.96 * std / np.sqrt(n)})
+
+
+def aggregate_scalar_runs(values: List[float]) -> Dict[str, float]:
+    """Same as aggregate_runs, for a plain list of scalar per-run values (e.g. unmatched rate)."""
+    arr = np.asarray(values, dtype=float)
+    n = len(arr)
+    std = float(arr.std())
+    return {'mean': float(arr.mean()), 'std': std, 'ci95': 1.96 * std / np.sqrt(n)}
 
 
 # ── plotting ───────────────────────────────────────────────────────────────
@@ -197,9 +222,15 @@ def make_plot(
         label = LABELS[group]
 
         mtb = mtb_results[group][condition]
-        ax.plot(ps, [mtb[p] for p in ps],
+        ax.plot(ps, [mtb['mean'][p] for p in ps],
                 linestyle='-', color=color, linewidth=1, marker='o', markersize=4,
-                label=f'{label} — MTB (real)')
+                label=f'{label} — MTB')
+        ax.fill_between(
+            ps,
+            [mtb['mean'][p] - mtb['ci95'][p] for p in ps],
+            [mtb['mean'][p] + mtb['ci95'][p] for p in ps],
+            alpha=0.28, color=color, edgecolor=color, linewidth=0.8,
+        )
 
         stb = stb_results[group][condition]
         ax.plot(ps, [stb['mean'][p] for p in ps],
@@ -207,9 +238,9 @@ def make_plot(
                 label=f'{label} — STB')
         ax.fill_between(
             ps,
-            [stb['mean'][p] - stb['std'][p] for p in ps],
-            [stb['mean'][p] + stb['std'][p] for p in ps],
-            alpha=0.12, color=color,
+            [stb['mean'][p] - stb['ci95'][p] for p in ps],
+            [stb['mean'][p] + stb['ci95'][p] for p in ps],
+            alpha=0.28, color=color, edgecolor=color, linewidth=0.8,
         )
 
     cond_label = 'matched students only' if condition == 'cond' else 'all students'
@@ -235,16 +266,33 @@ def make_diff_bar_plot(
 ):
     """
     Fig. 6 style plot: STB-MTB difference (pp) in top-p match rate for
-    p=1..max_p, plus the STB-MTB difference in unmatched rate as a final bar.
+    p=1..max_p, plus the unmatched-rate difference as a final bar. Every bar
+    uses "positive = STB better" -- for top-p match rate that's stb - mtb
+    (higher match rate is better), but for the unmatched-rate bar it's
+    mtb - stb (lower unmatched rate is better), so the sign is flipped there
+    to keep the color/label convention consistent instead of silently
+    inverted on just that one bar.
+
+    Error bars are a 95% CI on the DIFFERENCE itself, combining both sides'
+    independent lottery-draw variance: SE_diff = sqrt(SE_stb^2 + SE_mtb^2),
+    since STB and MTB are redrawn independently each run.
     """
     ps = list(range(1, max_p + 1))
     mtb = mtb_results[group][condition]
     stb = stb_results[group][condition]
-    diffs = [stb['mean'][p] - mtb[p] for p in ps]
+    diffs = [stb['mean'][p] - mtb['mean'][p] for p in ps]
+    diff_ci95 = [float(np.sqrt(stb['ci95'][p]**2 + mtb['ci95'][p]**2)) for p in ps]
 
     mtb_un = mtb_results[group]['unmatched']
-    stb_un = stb_results[group]['unmatched']['mean']
-    diffs.append(stb_un - mtb_un)
+    stb_un = stb_results[group]['unmatched']
+    # Every other bar is "higher match rate = STB better", so diff = stb - mtb
+    # with diff >= 0 meaning STB wins. Unmatched rate is the opposite -- lower
+    # is better -- so it's flipped here (mtb - stb) to keep that same
+    # "positive = STB better" convention consistent across every bar, instead
+    # of silently inverting the STB/MTB color and "better" direction only on
+    # this one bar.
+    diffs.append(mtb_un['mean'] - stb_un['mean'])
+    diff_ci95.append(float(np.sqrt(stb_un['ci95']**2 + mtb_un['ci95']**2)))
 
     labels = [str(p) for p in ps] + ['Unm.']
     x = np.arange(len(labels))
@@ -254,7 +302,8 @@ def make_diff_bar_plot(
 
     fig, ax = plt.subplots(figsize=(9, 4.5))
     colors = [STB_COLOR if d >= 0 else MTB_COLOR for d in diffs]
-    ax.bar(x, diffs, color=colors, width=0.65)
+    ax.bar(x, diffs, color=colors, width=0.65, yerr=diff_ci95, capsize=5,
+           error_kw={'ecolor': '#000000', 'elinewidth': 2})
     ax.axhline(0, color='black', linewidth=0.8)
 
     # vertical dotted line at the first sign flip among the p=1..max_p bars
@@ -265,11 +314,22 @@ def make_diff_bar_plot(
     ax.set_xticks(x)
     ax.set_xticklabels(labels)
     ax.set_xlabel('Top-p threshold / Match status', fontsize=12)
-    ax.set_ylabel('STB - MTB (pp)', fontsize=12)
+    # "STB - MTB" for the top-p bars; the Unm. bar is MTB - STB (see the sign
+    # flip above) so that positive always means "STB better" on every bar.
+    ax.set_ylabel('pp (positive = STB better)', fontsize=12)
 
-    ax.text(0.02, 0.95, '← STB better', transform=ax.transAxes,
+    # Pad the y-range so the STB/MTB-better labels sit in dedicated
+    # whitespace above/below the bars (including their error bars) instead
+    # of landing on top of whichever bar happens to be tallest/shortest.
+    bar_tops = [d + e for d, e in zip(diffs, diff_ci95)] + [0]
+    bar_bottoms = [d - e for d, e in zip(diffs, diff_ci95)] + [0]
+    y_max, y_min = max(bar_tops), min(bar_bottoms)
+    pad = 0.22 * (y_max - y_min) if y_max > y_min else 1.0
+    ax.set_ylim(y_min - pad, y_max + pad)
+
+    ax.text(0.02, 0.97, '← STB better', transform=ax.transAxes,
             ha='left', va='top', color=STB_COLOR, fontsize=11, fontweight='bold')
-    ax.text(0.98, 0.05, 'MTB better →', transform=ax.transAxes,
+    ax.text(0.98, 0.03, 'MTB better →', transform=ax.transAxes,
             ha='right', va='bottom', color=MTB_COLOR, fontsize=11, fontweight='bold')
 
     ax.spines['top'].set_visible(False)
@@ -284,49 +344,116 @@ def make_diff_bar_plot(
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--individual',    required=True)
+    parser.add_argument('--individual',    default=None,
+                         help='Fixed --individual CSV (real or a pre-built synthetic one). Mutually '
+                              'exclusive with --params_pkl; when given, only the lottery is redrawn '
+                              'each replicate (preferences stay fixed).')
+    parser.add_argument('--params_pkl',    default=None,
+                         help='Fitted Mallows params.pkl. When given (with --real_individual), each '
+                              'replicate draws a FRESH synthetic preference sample from this model AND '
+                              'a fresh lottery, together -- the CI then reflects both preference-sampling '
+                              'and lottery randomness, not just the lottery. Mutually exclusive with '
+                              '--individual.')
+    parser.add_argument('--real_individual', default=None,
+                         help='Real indv_df, used with --params_pkl to calibrate list lengths, female '
+                              'rate, and priority-flag base rates for synthetic resampling.')
+    parser.add_argument('--subdivision_col', default='Region',
+                         help="Only used with --params_pkl: 'Region' or 'Provincia', matching how the "
+                              "saved params were fit.")
     parser.add_argument('--capacity',      required=True)
     parser.add_argument('--output_uncond', default='welfare_uncond.png')
     parser.add_argument('--output_cond',   default='welfare_cond.png')
     parser.add_argument('--output_diff_bar', default='welfare_diff_bar.png',
                          help='Fig. 6 style STB-MTB difference bar chart.')
-    parser.add_argument('--n_stb_runs',   type=int, default=10)
-    parser.add_argument('--max_p',        type=int, default=12)
+    parser.add_argument('--n_stb_runs',   type=int, default=10,
+                         help='Independent replicates averaged for BOTH MTB and STB. With --individual, '
+                              'only the lottery is redrawn each replicate; with --params_pkl, preferences '
+                              'are also freshly resampled each replicate.')
+    parser.add_argument('--max_p',        type=int, default=10)
     parser.add_argument('--seed',         type=int, default=DATA_GENERATION_SEED)
     args = parser.parse_args()
 
+    if bool(args.individual) == bool(args.params_pkl):
+        parser.error('Pass exactly one of --individual or --params_pkl.')
+    if args.params_pkl and not args.real_individual:
+        parser.error('--params_pkl requires --real_individual (for calibration).')
+
     print("Loading data...")
-    indv_df     = load_df(args.individual)
     capacity_df = load_df(args.capacity)
+    school_table = _prepare_school_capacity_table(capacity_df)  # capacities are always real, never synthetic
 
-    applications_long = build_applications_long(indv_df)
-    student_attrs     = build_student_attrs(indv_df)
-    school_table      = _prepare_school_capacity_table(capacity_df)
+    if args.individual:
+        fixed_indv_df = load_df(args.individual)
+        mallows_params = None
+        real_indv_df_for_calibration = None
+    else:
+        fixed_indv_df = None
+        real_indv_df_for_calibration = load_df(args.real_individual)
+        with open(args.params_pkl, 'rb') as f:
+            mallows_params = pickle.load(f)
 
-    all_student_ids = sorted(applications_long['mrun'].unique().tolist())
-    print(f"  Students:   {len(all_student_ids):,}")
-    print(f"  Schools:    {len(school_table):,}")
-    print(f"  Female:     {(student_attrs['female'] == 1).sum():,}")
-    print(f"  Non-female: {(student_attrs['female'] == 0).sum():,}")
+    def get_indv_df_for_replicate(rng):
+        if fixed_indv_df is not None:
+            return fixed_indv_df
+        sys.path.insert(0, str(Path(__file__).resolve().parent / 'project_specific_scripts'))
+        from build_synthetic_chile_indv_df import build_synthetic_indv_df
+        return build_synthetic_indv_df(
+            mallows_params, real_indv_df_for_calibration, capacity_df, rng,
+            subdivision_col=args.subdivision_col, n_jobs=1, verbose=False,
+        )
+
+    print(f"  Schools: {len(school_table):,}")
+    print(f"  Mode: {'fixed --individual, lottery-only CI' if fixed_indv_df is not None else 'resampling preferences + lottery each replicate'}")
 
     rng = np.random.default_rng(args.seed)
 
-    # MTB — single run with per-school independent lottery draws
-    print("\nRunning MTB matching (real priority, per-school lottery)...")
-    student_ids_mtb, rankings_mtb, matches_mtb = run_matching(
-        applications_long, school_table, rng, student_lottery=None
-    )
-    print(f"  MTB match rate: {(matches_mtb >= 0).mean() * 100:.1f}%")
-    mtb_results = compute_top_p_curves(
-        student_ids_mtb, rankings_mtb, matches_mtb, student_attrs, args.max_p
-    )
+    # MTB — n_stb_runs independent replicates. MTB's per-school lottery is
+    # just as random as STB's single draw, so it's averaged the same way STB
+    # already is; when --params_pkl is given, each replicate also draws a
+    # fresh synthetic preference sample, so the CI captures both sources of
+    # randomness combined, not just the lottery.
+    print(f"\nRunning {args.n_stb_runs} MTB replicates (real priority, per-school lottery)...")
+    mtb_curves: Dict = {g: {'uncond': [], 'cond': [], 'unmatched': []} for g in ['all', 'female', 'nonfemale']}
+    for run in range(args.n_stb_runs):
+        print(f"  MTB run {run+1}/{args.n_stb_runs}...")
+        indv_df = get_indv_df_for_replicate(rng)
+        applications_long = build_applications_long(indv_df)
+        student_attrs = build_student_attrs(indv_df)
+        if run == 0:
+            print(f"    Students: {applications_long['mrun'].nunique():,}  "
+                  f"Female: {(student_attrs['female'] == 1).sum():,}  "
+                  f"Non-female: {(student_attrs['female'] == 0).sum():,}")
+        student_ids_mtb, rankings_mtb, matches_mtb = run_matching(
+            applications_long, school_table, rng, student_lottery=None
+        )
+        print(f"    Match rate: {(matches_mtb >= 0).mean() * 100:.1f}%")
+        run_curves = compute_top_p_curves(
+            student_ids_mtb, rankings_mtb, matches_mtb, student_attrs, args.max_p
+        )
+        for g in ['all', 'female', 'nonfemale']:
+            mtb_curves[g]['uncond'].append(run_curves[g]['uncond'])
+            mtb_curves[g]['cond'].append(run_curves[g]['cond'])
+            mtb_curves[g]['unmatched'].append(run_curves[g]['unmatched'])
 
-    # STB — n_stb_runs counterfactual runs with single per-student lottery
-    print(f"\nRunning {args.n_stb_runs} STB counterfactual runs...")
+    mtb_results = {
+        g: {
+            'uncond': aggregate_runs(mtb_curves[g]['uncond']),
+            'cond':   aggregate_runs(mtb_curves[g]['cond']),
+            'unmatched': aggregate_scalar_runs(mtb_curves[g]['unmatched']),
+        }
+        for g in ['all', 'female', 'nonfemale']
+    }
+
+    # STB — n_stb_runs replicates with single per-student lottery
+    print(f"\nRunning {args.n_stb_runs} STB replicates...")
     stb_curves: Dict = {g: {'uncond': [], 'cond': [], 'unmatched': []} for g in ['all', 'female', 'nonfemale']}
 
     for run in range(args.n_stb_runs):
         print(f"  STB run {run+1}/{args.n_stb_runs}...")
+        indv_df = get_indv_df_for_replicate(rng)
+        applications_long = build_applications_long(indv_df)
+        student_attrs = build_student_attrs(indv_df)
+        all_student_ids = sorted(applications_long['mrun'].unique().tolist())
         student_lottery = {sid: float(rng.random()) for sid in all_student_ids}
         student_ids_stb, rankings_stb, matches_stb = run_matching(
             applications_long, school_table, rng, student_lottery=student_lottery
@@ -344,10 +471,7 @@ def main():
         g: {
             'uncond': aggregate_runs(stb_curves[g]['uncond']),
             'cond':   aggregate_runs(stb_curves[g]['cond']),
-            'unmatched': {
-                'mean': np.mean(stb_curves[g]['unmatched']),
-                'std':  np.std(stb_curves[g]['unmatched']),
-            },
+            'unmatched': aggregate_scalar_runs(stb_curves[g]['unmatched']),
         }
         for g in ['all', 'female', 'nonfemale']
     }
@@ -360,21 +484,21 @@ def main():
     print("\nMTB vs STB summary (all students, unconditional):")
     print(f"{'p':>4}  {'MTB, Overall%':>6}  {'STB, Overall%':>6}  {'Overall Diff':>7} {'MTB, Female%':>6}  {'STB, Female%':>6}  {'Female Diff':>7} {'MTB, Non-female%':>6}  {'STB, Non-female%':>6}  {'Non-female Diff':>7}")
     for p in range(1, args.max_p + 1):
-        mtb_v = mtb_results['all']['uncond'][p]
+        mtb_v = mtb_results['all']['uncond']['mean'][p]
         stb_v = stb_results['all']['uncond']['mean'][p]
-        mtb_v_f = mtb_results['female']['uncond'][p]
+        mtb_v_f = mtb_results['female']['uncond']['mean'][p]
         stb_v_f = stb_results['female']['uncond']['mean'][p]
-        mtb_v_nf = mtb_results['nonfemale']['uncond'][p]
+        mtb_v_nf = mtb_results['nonfemale']['uncond']['mean'][p]
         stb_v_nf = stb_results['nonfemale']['uncond']['mean'][p]
         print(f"{p:>4}  {mtb_v:>6.1f}  {stb_v:>6.1f}  {stb_v - mtb_v:>+7.1f}pp {mtb_v_f:>6.1f}  {stb_v_f:>6.1f} {stb_v_f - mtb_v_f:>+7.1f}pp {mtb_v_nf:>6.1f}  {stb_v_nf:>6.1f}  {stb_v_nf - mtb_v_nf:>+7.1f}pp")
 
     print(f"\nUnmatched rates:")
     print(f"{'':>4}  {'MTB Overall':>12}  {'STB Overall':>12}  {'MTB Female':>12}  {'STB Female':>12}  {'MTB Non-f':>12}  {'STB Non-f':>12}")
-    mtb_un    = mtb_results['all']['unmatched']
+    mtb_un    = mtb_results['all']['unmatched']['mean']
     stb_un    = stb_results['all']['unmatched']['mean']
-    mtb_un_f  = mtb_results['female']['unmatched']
+    mtb_un_f  = mtb_results['female']['unmatched']['mean']
     stb_un_f  = stb_results['female']['unmatched']['mean']
-    mtb_un_nf = mtb_results['nonfemale']['unmatched']
+    mtb_un_nf = mtb_results['nonfemale']['unmatched']['mean']
     stb_un_nf = stb_results['nonfemale']['unmatched']['mean']
     print(f"{'':>4}  {mtb_un:>12.1f}  {stb_un:>12.1f}  {mtb_un_f:>12.1f}  {stb_un_f:>12.1f}  {mtb_un_nf:>12.1f}  {stb_un_nf:>12.1f}")
 

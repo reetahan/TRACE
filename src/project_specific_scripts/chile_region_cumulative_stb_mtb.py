@@ -3,9 +3,10 @@ Fig. 8 style plot: cumulative assignment outcomes (share matched to top choice,
 one of top 5, or any listed school) under MTB and STB, broken out by Chilean
 Region.
 
-MTB uses a single real-lottery run (matches the observed mechanism, same
-convention as chilean_real_welfare_comparison.py). STB is averaged over
---n_stb_runs independent counterfactual single-draw-per-student runs.
+Both MTB and STB are averaged over --n_stb_runs independent lottery draws
+(MTB's per-school lottery and STB's single-draw-per-student lottery are each
+their own source of randomness, so both get a 95% CI band/error bars, not
+just STB).
 
 Region labels use Chile's official Roman-numeral region codes (I-XVI,
 including Nuble as XVI). The mapping is keyed on the exact 'Region' string
@@ -24,6 +25,7 @@ Usage:
 """
 
 import argparse
+import pickle
 import sys
 from pathlib import Path
 
@@ -109,37 +111,96 @@ def compute_region_buckets(student_ids, student_rankings, matches, student_regio
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--individual', required=True)
+    parser.add_argument('--individual', default=None,
+                         help='Fixed --individual CSV (real or a pre-built synthetic one). Mutually '
+                              'exclusive with --params_pkl; when given, only the lottery is redrawn '
+                              'each replicate (preferences stay fixed).')
+    parser.add_argument('--params_pkl', default=None,
+                         help='Fitted Mallows params.pkl. When given (with --real_individual), each '
+                              'replicate draws a FRESH synthetic preference sample AND a fresh lottery, '
+                              'together -- the CI then reflects both preference-sampling and lottery '
+                              'randomness, not just the lottery. Mutually exclusive with --individual.')
+    parser.add_argument('--real_individual', default=None,
+                         help='Real indv_df, used with --params_pkl to calibrate synthetic resampling.')
+    parser.add_argument('--subdivision_col', default='Region',
+                         help="Only used with --params_pkl: 'Region' or 'Provincia', matching how the "
+                              "saved params were fit.")
     parser.add_argument('--capacity', required=True)
-    parser.add_argument('--n_stb_runs', type=int, default=10)
+    parser.add_argument('--n_stb_runs', type=int, default=10,
+                         help='Independent replicates for both MTB and STB. With --individual, only the '
+                              'lottery is redrawn each replicate; with --params_pkl, preferences are also '
+                              'freshly resampled each replicate.')
     parser.add_argument('--output', default='fig8_chile_region_cumulative.png')
     parser.add_argument('--seed', type=int, default=DATA_GENERATION_SEED)
     args = parser.parse_args()
 
+    if bool(args.individual) == bool(args.params_pkl):
+        parser.error('Pass exactly one of --individual or --params_pkl.')
+    if args.params_pkl and not args.real_individual:
+        parser.error('--params_pkl requires --real_individual (for calibration).')
+
     print("Loading data...")
-    indv_df = load_df(args.individual)
     capacity_df = load_df(args.capacity)
-    applications_long = build_applications_long(indv_df)
-    student_region = build_student_region(indv_df)
-    school_table = _prepare_school_capacity_table(capacity_df)
-    all_student_ids = sorted(applications_long['mrun'].unique().tolist())
+    school_table = _prepare_school_capacity_table(capacity_df)  # capacities are always real, never synthetic
+
+    if args.individual:
+        fixed_indv_df = load_df(args.individual)
+        mallows_params = None
+        real_indv_df_for_calibration = None
+    else:
+        fixed_indv_df = None
+        real_indv_df_for_calibration = load_df(args.real_individual)
+        with open(args.params_pkl, 'rb') as f:
+            mallows_params = pickle.load(f)
+
+    def get_indv_df_for_replicate(rng):
+        if fixed_indv_df is not None:
+            return fixed_indv_df
+        from build_synthetic_chile_indv_df import build_synthetic_indv_df
+        return build_synthetic_indv_df(
+            mallows_params, real_indv_df_for_calibration, capacity_df, rng,
+            subdivision_col=args.subdivision_col, n_jobs=1, verbose=False,
+        )
+
+    print(f"  Schools: {len(school_table):,}")
+    print(f"  Mode: {'fixed --individual, lottery-only CI' if fixed_indv_df is not None else 'resampling preferences + lottery each replicate'}")
 
     rng = np.random.default_rng(args.seed)
 
-    print("Running MTB matching (real priority, per-school lottery)...")
-    student_ids, rankings, matches = run_matching(applications_long, school_table, rng, student_lottery=None)
-    mtb_buckets = compute_region_buckets(student_ids, rankings, matches, student_region)
+    # MTB's per-school lottery is drawn fresh each call (student_lottery=None)
+    # and is just as random as STB's single draw, so it's averaged over
+    # n_stb_runs the same way STB is -- otherwise only STB would carry a CI.
+    # When --params_pkl is given, each replicate also draws a fresh synthetic
+    # preference sample, so the CI captures both sources of randomness.
+    print(f"Running {args.n_stb_runs} MTB replicates (real priority, per-school lottery)...")
+    mtb_runs = []
+    for run in range(args.n_stb_runs):
+        print(f"  MTB run {run + 1}/{args.n_stb_runs}...")
+        indv_df = get_indv_df_for_replicate(rng)
+        applications_long = build_applications_long(indv_df)
+        student_region = build_student_region(indv_df)
+        student_ids, rankings, matches = run_matching(applications_long, school_table, rng, student_lottery=None)
+        mtb_runs.append(compute_region_buckets(student_ids, rankings, matches, student_region))
+    mtb_concat = pd.concat(mtb_runs)
+    mtb_buckets = mtb_concat.groupby(level=0).mean()
+    mtb_ci95 = 1.96 * mtb_concat.groupby(level=0).std() / np.sqrt(args.n_stb_runs)
 
-    print(f"Running {args.n_stb_runs} STB counterfactual runs...")
+    print(f"Running {args.n_stb_runs} STB replicates...")
     stb_runs = []
     for run in range(args.n_stb_runs):
         print(f"  STB run {run + 1}/{args.n_stb_runs}...")
+        indv_df = get_indv_df_for_replicate(rng)
+        applications_long = build_applications_long(indv_df)
+        student_region = build_student_region(indv_df)
+        all_student_ids = sorted(applications_long['mrun'].unique().tolist())
         student_lottery = {sid: float(rng.random()) for sid in all_student_ids}
         student_ids, rankings, matches = run_matching(
             applications_long, school_table, rng, student_lottery=student_lottery
         )
         stb_runs.append(compute_region_buckets(student_ids, rankings, matches, student_region))
-    stb_buckets = pd.concat(stb_runs).groupby(level=0).mean()
+    stb_concat = pd.concat(stb_runs)
+    stb_buckets = stb_concat.groupby(level=0).mean()
+    stb_ci95 = 1.96 * stb_concat.groupby(level=0).std() / np.sqrt(args.n_stb_runs)
 
     regions = [r for r in ROMAN_ORDER if r in mtb_buckets.index and r in stb_buckets.index]
 
@@ -151,15 +212,20 @@ def main():
     width = 0.36
     fig, ax = plt.subplots(figsize=(13, 5))
 
-    for offset, buckets, colors, prefix in [
-        (-width / 2, stb_buckets, STB_COLORS, 'STB'),
-        (width / 2, mtb_buckets, MTB_COLORS, 'MTB'),
+    for offset, buckets, ci95_buckets, colors, prefix in [
+        (-width / 2, stb_buckets, stb_ci95, STB_COLORS, 'STB'),
+        (width / 2, mtb_buckets, mtb_ci95, MTB_COLORS, 'MTB'),
     ]:
         bottoms = np.zeros(len(regions))
         for seg, seg_label in [('top1', 'Top 1'), ('top2_5', 'Top 2-5'), ('top6p', 'Top 6+')]:
             vals = np.array([buckets.loc[r, seg] for r in regions])
+            errs = np.array([ci95_buckets.loc[r, seg] for r in regions])
+            # yerr is centered at bottom+vals (the top of this stacked
+            # segment), showing the 95% CI on the cumulative height reached
+            # by that segment.
             ax.bar(x + offset, vals, width, bottom=bottoms, color=colors[seg],
-                   label=f'{prefix} - {seg_label}')
+                   label=f'{prefix} - {seg_label}', yerr=errs,
+                   error_kw={'ecolor': '#000000', 'elinewidth': 1.6, 'capsize': 3.5})
             bottoms += vals
 
     ax.set_xticks(x)
