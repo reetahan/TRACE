@@ -171,13 +171,7 @@ def compute_top_p_curves(
 
 
 def aggregate_runs(curve_list: List[pd.Series]) -> pd.DataFrame:
-    """
-    mean/std/ci95 across independent lottery-draw runs, holding real
-    preference data fixed. ci95 is the normal-approximation 95% CI
-    half-width on the mean (1.96 * std/sqrt(n)) -- it answers "how much
-    would this estimate move if the lottery were redrawn", not sampling
-    uncertainty about the student population or model uncertainty.
-    """
+    """mean/std/ci95 (normal-approx 95% CI) across independent lottery-draw runs."""
     df = pd.concat(curve_list, axis=1)
     n = df.shape[1]
     std = df.std(axis=1)
@@ -264,19 +258,7 @@ def make_diff_bar_plot(
     output_path: str,
     group: str = 'all',
 ):
-    """
-    Fig. 6 style plot: STB-MTB difference (pp) in top-p match rate for
-    p=1..max_p, plus the unmatched-rate difference as a final bar. Every bar
-    uses "positive = STB better" -- for top-p match rate that's stb - mtb
-    (higher match rate is better), but for the unmatched-rate bar it's
-    mtb - stb (lower unmatched rate is better), so the sign is flipped there
-    to keep the color/label convention consistent instead of silently
-    inverted on just that one bar.
-
-    Error bars are a 95% CI on the DIFFERENCE itself, combining both sides'
-    independent lottery-draw variance: SE_diff = sqrt(SE_stb^2 + SE_mtb^2),
-    since STB and MTB are redrawn independently each run.
-    """
+    """Fig. 6 style plot: STB-MTB difference (pp) per top-p threshold, plus unmatched rate. Positive = STB better."""
     ps = list(range(1, max_p + 1))
     mtb = mtb_results[group][condition]
     stb = stb_results[group][condition]
@@ -285,13 +267,7 @@ def make_diff_bar_plot(
 
     mtb_un = mtb_results[group]['unmatched']
     stb_un = stb_results[group]['unmatched']
-    # Every other bar is "higher match rate = STB better", so diff = stb - mtb
-    # with diff >= 0 meaning STB wins. Unmatched rate is the opposite -- lower
-    # is better -- so it's flipped here (mtb - stb) to keep that same
-    # "positive = STB better" convention consistent across every bar, instead
-    # of silently inverting the STB/MTB color and "better" direction only on
-    # this one bar.
-    diffs.append(mtb_un['mean'] - stb_un['mean'])
+    diffs.append(mtb_un['mean'] - stb_un['mean'])  # flipped: lower unmatched is better
     diff_ci95.append(float(np.sqrt(stb_un['ci95']**2 + mtb_un['ci95']**2)))
 
     labels = [str(p) for p in ps] + ['Unm.']
@@ -314,13 +290,8 @@ def make_diff_bar_plot(
     ax.set_xticks(x)
     ax.set_xticklabels(labels)
     ax.set_xlabel('Top-p threshold / Match status', fontsize=12)
-    # "STB - MTB" for the top-p bars; the Unm. bar is MTB - STB (see the sign
-    # flip above) so that positive always means "STB better" on every bar.
     ax.set_ylabel('pp (positive = STB better)', fontsize=12)
 
-    # Pad the y-range so the STB/MTB-better labels sit in dedicated
-    # whitespace above/below the bars (including their error bars) instead
-    # of landing on top of whichever bar happens to be tallest/shortest.
     bar_tops = [d + e for d, e in zip(diffs, diff_ci95)] + [0]
     bar_bottoms = [d - e for d, e in zip(diffs, diff_ci95)] + [0]
     y_max, y_min = max(bar_tops), min(bar_bottoms)
@@ -345,30 +316,21 @@ def make_diff_bar_plot(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--individual',    default=None,
-                         help='Fixed --individual CSV (real or a pre-built synthetic one). Mutually '
-                              'exclusive with --params_pkl; when given, only the lottery is redrawn '
-                              'each replicate (preferences stay fixed).')
+                         help='Fixed --individual CSV. Mutually exclusive with --params_pkl.')
     parser.add_argument('--params_pkl',    default=None,
-                         help='Fitted Mallows params.pkl. When given (with --real_individual), each '
-                              'replicate draws a FRESH synthetic preference sample from this model AND '
-                              'a fresh lottery, together -- the CI then reflects both preference-sampling '
-                              'and lottery randomness, not just the lottery. Mutually exclusive with '
-                              '--individual.')
+                         help='Fitted Mallows params.pkl; resamples preferences + lottery each replicate. '
+                              'Mutually exclusive with --individual.')
     parser.add_argument('--real_individual', default=None,
-                         help='Real indv_df, used with --params_pkl to calibrate list lengths, female '
-                              'rate, and priority-flag base rates for synthetic resampling.')
+                         help='Real indv_df, used with --params_pkl to calibrate synthetic resampling.')
     parser.add_argument('--subdivision_col', default='Region',
-                         help="Only used with --params_pkl: 'Region' or 'Provincia', matching how the "
-                              "saved params were fit.")
+                         help="Only used with --params_pkl: 'Region' or 'Provincia'.")
     parser.add_argument('--capacity',      required=True)
     parser.add_argument('--output_uncond', default='welfare_uncond.png')
     parser.add_argument('--output_cond',   default='welfare_cond.png')
     parser.add_argument('--output_diff_bar', default='welfare_diff_bar.png',
                          help='Fig. 6 style STB-MTB difference bar chart.')
     parser.add_argument('--n_stb_runs',   type=int, default=10,
-                         help='Independent replicates averaged for BOTH MTB and STB. With --individual, '
-                              'only the lottery is redrawn each replicate; with --params_pkl, preferences '
-                              'are also freshly resampled each replicate.')
+                         help='Independent replicates averaged for BOTH MTB and STB.')
     parser.add_argument('--max_p',        type=int, default=10)
     parser.add_argument('--seed',         type=int, default=DATA_GENERATION_SEED)
     args = parser.parse_args()
@@ -407,11 +369,6 @@ def main():
 
     rng = np.random.default_rng(args.seed)
 
-    # MTB — n_stb_runs independent replicates. MTB's per-school lottery is
-    # just as random as STB's single draw, so it's averaged the same way STB
-    # already is; when --params_pkl is given, each replicate also draws a
-    # fresh synthetic preference sample, so the CI captures both sources of
-    # randomness combined, not just the lottery.
     print(f"\nRunning {args.n_stb_runs} MTB replicates (real priority, per-school lottery)...")
     mtb_curves: Dict = {g: {'uncond': [], 'cond': [], 'unmatched': []} for g in ['all', 'female', 'nonfemale']}
     for run in range(args.n_stb_runs):

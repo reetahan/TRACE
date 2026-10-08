@@ -102,17 +102,13 @@ def decile_metrics(df):
             'pct_unmatched': 100.0 * (~sub['matched']).sum() / n,
             'top1_pct': 100.0 * (sub['rank_pos'] == 1).sum() / n,
             'top5_pct': 100.0 * (sub['rank_pos'] <= 5).sum() / n,
+            'avg_rank': sub.loc[sub['matched'], 'rank_pos'].mean(),
         })
     return pd.DataFrame(rows).set_index('decile')
 
 
 def plot_decile_value_distributions(stb_vals, mtb_vals, output_path):
-    """
-    Diagnostic plot, regenerated every run regardless of which aggregation
-    MTB's decile currently uses: overlaid histograms of the raw, pre-qcut
-    scalar each condition's decile is built from (STB's single draw; MTB's
-    whatever-the-current-aggregation-is), pooled across all replicates
-    """
+    """Overlaid histograms of the raw, pre-qcut decile-bucketing value for STB vs MTB."""
     fig, ax = plt.subplots(figsize=(9, 5))
     bins = np.linspace(
         min(stb_vals.min(), mtb_vals.min()),
@@ -143,44 +139,27 @@ def plot_decile_value_distributions(stb_vals, mtb_vals, output_path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--individual', default=None,
-                         help='Fixed --individual CSV (real or a pre-built synthetic one). Mutually '
-                              'exclusive with --params_pkl; when given, only the lottery is redrawn '
-                              'each replicate (preferences stay fixed).')
+                         help='Fixed --individual CSV. Mutually exclusive with --params_pkl.')
     parser.add_argument('--params_pkl', default=None,
-                         help='Fitted Mallows params.pkl. When given (with --real_individual), each '
-                              'replicate draws a FRESH synthetic preference sample AND a fresh lottery, '
-                              'together -- the CI then reflects both preference-sampling and lottery '
-                              'randomness, not just the lottery. Mutually exclusive with --individual.')
+                         help='Fitted Mallows params.pkl; resamples preferences + lottery each replicate. '
+                              'Mutually exclusive with --individual.')
     parser.add_argument('--real_individual', default=None,
                          help='Real indv_df, used with --params_pkl to calibrate synthetic resampling.')
     parser.add_argument('--subdivision_col', default='Region',
-                         help="Only used with --params_pkl: 'Region' or 'Provincia', matching how the "
-                              "saved params were fit.")
+                         help="Only used with --params_pkl: 'Region' or 'Provincia'.")
     parser.add_argument('--capacity', required=True)
-    parser.add_argument('--n_runs', type=int, default=10,
-                         help='Independent replicates averaged per condition. With --individual, only '
-                              'the lottery is redrawn each replicate; with --params_pkl, preferences are '
-                              'also freshly resampled each replicate.')
+    parser.add_argument('--n_runs', type=int, default=10)
     parser.add_argument('--mtb_decile_agg',
                          choices=['min', 'median', 'mean', 'rank_weighted_avg', 'first_choice', 'matched_school'],
                          default='rank_weighted_avg',
-                         help="How to collapse a student's per-school MTB lottery draws into the single "
-                              "scalar their decile is built from. 'min'/'median'/'mean'/'rank_weighted_avg' "
-                              "aggregate over their top --mtb_decile_topk listed preferences (order "
-                              "statistic / order statistic / CLT-concentrated / rank-weighted-CLT-"
-                              "concentrated, respectively.")
+                         help="How to collapse a student's per-school MTB lottery draws into one scalar.")
     parser.add_argument('--mtb_decile_topk', type=int, default=5,
-                         help="Number of top-ranked preferences to aggregate over for the min/median/mean/"
-                              "rank_weighted_avg aggregations (default 5). Lower it (e.g. 2 or 3) for a "
-                              "milder version of min/mean's distributional distortion. Ignored by "
-                              "first_choice and matched_school.")
+                         help="Top-k preferences to aggregate over for min/median/mean/rank_weighted_avg. "
+                              "Ignored by first_choice and matched_school.")
     parser.add_argument('--output', default=None,
-                         help='Defaults to fig4_chile_lottery_decile_<agg tag>.png, so switching '
-                              '--mtb_decile_agg/--mtb_decile_topk does not silently overwrite another '
-                              "method's plot.")
+                         help='Defaults to fig4_chile_lottery_decile_<agg tag>.png.')
     parser.add_argument('--output_dist', default=None,
-                         help='Diagnostic plot comparing the raw distribution STB vs MTB deciles are built '
-                              'from. Defaults to fig4_decile_value_distributions_<agg tag>.png.')
+                         help='Defaults to fig4_decile_value_distributions_<agg tag>.png.')
     parser.add_argument('--seed', type=int, default=DATA_GENERATION_SEED)
     args = parser.parse_args()
 
@@ -239,8 +218,7 @@ def main():
     rng = np.random.default_rng(args.seed)
 
     metrics_by_condition = {'STB': [], 'MTB': []}
-    decile_value_pool = {'STB': [], 'MTB': []}  # raw pre-qcut scalars, pooled across replicates,
-                                                 # for the distribution-comparison plot below
+    decile_value_pool = {'STB': [], 'MTB': []}
     for run in range(args.n_runs):
         print(f"Run {run + 1}/{args.n_runs}...")
         indv_df = get_indv_df_for_replicate(rng)
@@ -267,9 +245,6 @@ def main():
         metrics_by_condition['MTB'].append(decile_metrics(df))
         decile_value_pool['MTB'].append(df['decile_val'].to_numpy())
 
-    # 95% CI (normal approx, 1.96*SE) on the mean across the n_runs lottery
-    # draws -- holding the real observed preference data fixed, this answers
-    # "how much would this estimate move if the lottery were redrawn."
     stats = {}
     for cond in ['STB', 'MTB']:
         grouped = pd.concat(metrics_by_condition[cond]).groupby(level=0)
@@ -291,12 +266,6 @@ def main():
             print(f"  {cond:>3} {metric:>13}: min={ci_series.min():.3f}pp  "
                   f"max={ci_series.max():.3f}pp  mean={ci_series.mean():.3f}pp")
 
-    # Per-decile STB-vs-MTB significance check -- answers "is this crossing/
-    # gap real or noise" directly as a number instead of by eyeballing two
-    # thin, likely-imperceptible shaded bands on the plot. diff_ci95 is the
-    # 95% CI on the DIFFERENCE itself (combining both sides' independent
-    # variance: sqrt(se_stb^2 + se_mtb^2)); '*' marks deciles where the STB-MTB
-    # gap exceeds that CI, i.e. is distinguishable from noise at this n_runs.
     print("\nSTB - MTB gap per decile, with 95% CI on the DIFFERENCE ('*' = exceeds CI, real not noise):")
     for metric in ['pct_unmatched', 'top1_pct', 'top5_pct']:
         print(f"  {metric}:")
@@ -311,39 +280,40 @@ def main():
                   f"diff={diff:+6.2f}pp  ci95={diff_ci:5.2f}pp {flag}")
 
     # ── plot ──────────────────────────────────────────────────────────────
-    COLORS = {'pct_unmatched': '#111111', 'top1_pct': '#1565C0', 'top5_pct': '#AD1457'}
-    LABELS = {'pct_unmatched': 'Unmatched', 'top1_pct': 'Top-1', 'top5_pct': 'Top-5'}
+    COLORS = {'pct_unmatched': '#111111', 'top1_pct': '#1565C0', 'top5_pct': '#AD1457', 'avg_rank': '#D4A017'}
+    LABELS = {'pct_unmatched': 'Unmatched', 'top1_pct': 'Top-1', 'top5_pct': 'Top-5', 'avg_rank': 'Avg Rank'}
     STYLES = {'STB': '-', 'MTB': '--'}
-    MARKERS = {'pct_unmatched': 'o', 'top1_pct': 's', 'top5_pct': '^'}
+    MARKERS = {'pct_unmatched': 'o', 'top1_pct': 's', 'top5_pct': '^', 'avg_rank': 'D'}
 
     deciles = list(range(1, N_DECILES + 1))
     fig, ax = plt.subplots(figsize=(7, 5))
+    ax2 = ax.twinx()
     for cond in ['STB', 'MTB']:
         for metric in ['pct_unmatched', 'top1_pct', 'top5_pct']:
             mean_vals = stats[cond]['mean'][metric].reindex(deciles)
             ci_vals = stats[cond]['ci95'][metric].reindex(deciles)
-            ax.plot(deciles, mean_vals, color=COLORS[metric],
-                    linestyle=STYLES[cond], marker=MARKERS[metric], markersize=6,
-                    linewidth=1.8, label=f'{LABELS[metric]} ({cond})')
-            ax.fill_between(deciles, mean_vals - ci_vals, mean_vals + ci_vals,
-                             color=COLORS[metric], alpha=0.28,
-                             edgecolor=COLORS[metric], linewidth=0.8)
+            ax.errorbar(deciles, mean_vals, yerr=ci_vals,
+                        color=COLORS[metric], linestyle=STYLES[cond], marker=MARKERS[metric],
+                        markersize=6, linewidth=1.8, label=f'{LABELS[metric]} ({cond})',
+                        ecolor='#000000', elinewidth=2, capsize=5, capthick=2, zorder=6)
+        mean_vals = stats[cond]['mean']['avg_rank'].reindex(deciles)
+        ci_vals = stats[cond]['ci95']['avg_rank'].reindex(deciles)
+        ax2.errorbar(deciles, mean_vals, yerr=ci_vals,
+                    color=COLORS['avg_rank'], linestyle=STYLES[cond], marker=MARKERS['avg_rank'],
+                    markersize=6, linewidth=1.8, label=f"{LABELS['avg_rank']} ({cond})",
+                    ecolor='#000000', elinewidth=2, capsize=5, capthick=2, zorder=6)
 
     ax.set_xlabel('Lottery Decile', fontsize=12)
     ax.set_ylabel('Match Rate (%)', fontsize=12)
+    ax2.set_ylabel('Average Rank', fontsize=12)
     ax.set_xticks(deciles)
-    # Autoscale to the actual data range (mean lines + CI bands) instead of a
-    # fixed 0-100 -- the CI half-widths here are ~0.2-0.4pp, which render as
-    # nothing on a 100-unit axis; zooming to the real spread makes them
-    # visible without exaggerating their true size. margins() adds a little
-    # breathing room above/below rather than cropping tight to the data.
     ax.margins(y=0.08)
+    ax2.margins(y=0.08)
     ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
 
     metric_handles = [
         plt.Line2D([], [], color=COLORS[m], marker=MARKERS[m], linestyle='-', label=LABELS[m])
-        for m in ['pct_unmatched', 'top1_pct', 'top5_pct']
+        for m in ['pct_unmatched', 'top1_pct', 'top5_pct', 'avg_rank']
     ]
     style_handles = [plt.Line2D([], [], color='gray', linestyle=STYLES[c], label=c) for c in ['STB', 'MTB']]
     leg1 = ax.legend(handles=metric_handles, loc='upper left', fontsize=10, frameon=False)

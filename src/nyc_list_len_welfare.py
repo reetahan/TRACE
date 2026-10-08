@@ -236,17 +236,7 @@ def run_matching(
 
 
 def _baseline_cohort_stats_by_group(cohort_df: pd.DataFrame, group_col: str) -> pd.DataFrame:
-    """
-    Same idea as the Overall avg_rank_baseline_cohort in run_sweep, but broken
-    out per group (borough / lottery_decile): restrict to students who were
-    matched at the baseline (smallest) min_length -- a fixed cohort per group,
-    since group membership itself (which borough/decile a student is in)
-    doesn't change across min_length -- then compute avg_rank over that fixed
-    group at the current min_length. Returns one row per group value with
-    columns [group_col, avg_rank_baseline_cohort, pct_baseline_cohort_matched,
-    top3_baseline_cohort], suitable for merging onto the per-(p, group) sweep
-    rows on group_col (broadcasting the same value across every p).
-    """
+    """Per-group avg_rank_baseline_cohort, same idea as run_sweep's Overall version."""
     rows = []
     for val, g in cohort_df.groupby(group_col, observed=True):
         s = _rank_stats(g['match_rank'])
@@ -312,9 +302,6 @@ def run_sweep(params, lottery, df, match_stats_df, school_info_df,
         priority_config=priority_config,
     )
 
-    # Sample each student's natural (unconstrained) list length ONCE, so the
-    # min_len sweep below only ever raises a floor on a fixed draw instead of
-    # re-randomizing every student's submitted list at each sweep point.
     natural_list_lengths, max_len_by_district = sample_natural_list_lengths(
         all_rankings=all_rankings,
         all_district_assignments=all_district_assignments,
@@ -324,14 +311,6 @@ def run_sweep(params, lottery, df, match_stats_df, school_info_df,
         rng=rng,
     )
 
-    # Baseline = smallest min_len in the sweep, i.e. "no added minimum". Its
-    # matched cohort is fixed and reused as the population for
-    # avg_rank_baseline_cohort at every other sweep point, so composition
-    # changes (newly-matched students entering the average) don't get
-    # conflated with rank-quality changes among students who were already
-    # matched with no minimum imposed. Requires the baseline point to run
-    # first, so the sweep order is fixed here regardless of --min_lengths order
-    # (downstream consumers already sort by list_length_min before plotting).
     ordered_min_lengths = sorted(min_lengths)
     baseline_min_len = ordered_min_lengths[0]
     baseline_matched_student_ids = None
@@ -405,8 +384,6 @@ def run_sweep(params, lottery, df, match_stats_df, school_info_df,
             welfare_results.student_level['student_id'].isin(baseline_matched_student_ids)
         ]
         cohort_stats = _rank_stats(cohort_df['match_rank'])
-        # Unconditional over the cohort (unmatched counts as not-top-3), same
-        # convention as top_p_pct elsewhere (welfare.py's _top_p_flag).
         cohort_top3_pct = 100 * cohort_df['match_rank'].le(3).fillna(False).mean()
         borough_cohort_stats = _baseline_cohort_stats_by_group(cohort_df, 'borough')
         lottery_cohort_stats = _baseline_cohort_stats_by_group(cohort_df, 'lottery_decile')

@@ -129,33 +129,26 @@ def plot_overall_match_and_top3(df, overall_top3, b_matched, b_stats, output_pat
 def plot_sweep(df, overall_df, group_data_matched, group_data_stats,
                group_col, group_values, group_names, group_colors,
                linestyle, output_path, overall_vals=None, overall_top3=None,
-               avg_rank_col='avg_rank', show_baseline_cohort_overlay=True):
+               avg_rank_col='avg_rank_baseline_cohort'):
+    """Panel order: % Matched, Top-3 Match Rate, Average Matched Rank (avg_rank_col)."""
+    if avg_rank_col not in group_data_stats.columns:
+        raise ValueError(
+            f"{avg_rank_col!r} not found in group_data_stats -- rerun nyc_list_len_welfare.py "
+            "with the current code to add it, then regenerate the sweep CSVs."
+        )
 
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
     if overall_vals is None:
         overall_vals = {
             'pct_matched': df['pct_matched'],
-            'avg_rank':    df[avg_rank_col],
             'top_p_pct':   overall_top3['top_p_pct'],
+            'avg_rank':    df[avg_rank_col],
         }
-    for ax, col in zip(axes, ['pct_matched', 'avg_rank', 'top_p_pct']):
+    for ax, col in zip(axes, ['pct_matched', 'top_p_pct', 'avg_rank']):
         ax.plot(overall_df['list_length_min'], overall_vals[col],
                 marker='o', color='black', linewidth=LWIDTH_OVERALL,
                 markersize=MSIZE, label='Overall', zorder=5)
-
-    if show_baseline_cohort_overlay:
-        baseline_cohort_col = {
-            0: 'pct_baseline_cohort_matched',
-            1: 'avg_rank_baseline_cohort',
-            2: 'top3_baseline_cohort',
-        }
-        for i, ax in enumerate(axes):
-            col = baseline_cohort_col[i]
-            if col in overall_df.columns:
-                ax.plot(overall_df['list_length_min'], overall_df[col],
-                        marker='s', color='black', linewidth=LWIDTH_OVERALL, linestyle='--',
-                        markersize=MSIZE, label='Overall (baseline-matched cohort only)', zorder=5)
 
     for val in group_values:
         color = group_colors[val]
@@ -168,10 +161,10 @@ def plot_sweep(df, overall_df, group_data_matched, group_data_stats,
                          color=color, linewidth=LWIDTH_GROUP,
                          markersize=MSIZE, linestyle=linestyle, label=label)
         if not gs.empty:
-            axes[1].plot(gs['list_length_min'], gs[avg_rank_col],
+            axes[1].plot(gs['list_length_min'], gs['top_p_pct'],
                          color=color, linewidth=LWIDTH_GROUP,
                          markersize=MSIZE, linestyle=linestyle, label=label)
-            axes[2].plot(gs['list_length_min'], gs['top_p_pct'],
+            axes[2].plot(gs['list_length_min'], gs[avg_rank_col],
                          color=color, linewidth=LWIDTH_GROUP,
                          markersize=MSIZE, linestyle=linestyle, label=label)
 
@@ -183,15 +176,13 @@ def plot_sweep(df, overall_df, group_data_matched, group_data_stats,
         ax.tick_params(axis='both', labelsize=FONT)
 
     axes[0].set_ylabel('% Matched', fontsize=FONT)
-    axes[1].set_ylabel('Average Rank', fontsize=FONT)
-    axes[2].set_ylabel('Top-3 Match Rate (%)', fontsize=FONT)
+    axes[1].set_ylabel('Top-3 Match Rate (%)', fontsize=FONT)
+    axes[2].set_ylabel('Average Matched Rank', fontsize=FONT)
 
     handles, labels = axes[0].get_legend_handles_labels()
-    n_cols = min(len(labels), 6)
-    n_legend_rows = -(-len(labels) // n_cols)  # ceil
-    fig.legend(handles, labels, fontsize=LEGEND_FONT, loc='upper center',
-               bbox_to_anchor=(0.5, 0.0), ncol=n_cols, frameon=True)
-    fig.subplots_adjust(bottom=0.12 + 0.06 * n_legend_rows)
+    fig.legend(handles, labels, fontsize=LEGEND_FONT, loc='lower center',
+               bbox_to_anchor=(0.5, 1.0), ncol=len(labels), frameon=True)
+    fig.subplots_adjust(top=0.85)
 
     fig.savefig(output_path, dpi=200, bbox_inches='tight')
     plt.close(fig)
@@ -223,10 +214,15 @@ def main(sweep_dir):
         .reset_index(name='top_p_pct')
     )
 
+    if 'avg_rank_baseline_cohort' not in df.columns:
+        raise SystemExit(
+            "sweep_summary.csv has no avg_rank_baseline_cohort column -- rerun "
+            "nyc_list_len_welfare.py with the current code to add it."
+        )
     overall_vals = {
         'pct_matched': df['pct_matched'],
-        'avg_rank':    df['avg_rank'],
         'top_p_pct':   overall_top3['top_p_pct'],
+        'avg_rank':    df['avg_rank_baseline_cohort'],
     }
 
     # Overall + per-borough match % vs top-3 match %, by minimum list length
@@ -265,52 +261,6 @@ def main(sweep_dir):
         output_path=in_path('unmatched_avgrank_top3_min_list_length_lottery.png'),
         overall_vals=overall_vals
     )
-
-    if 'avg_rank_baseline_cohort' in df.columns:
-        overall_vals_cohort = dict(overall_vals, avg_rank=df['avg_rank_baseline_cohort'])
-
-        if 'avg_rank_baseline_cohort' in b_stats.columns:
-            plot_sweep(
-                df=df,
-                overall_df=df,
-                group_data_matched=b_matched,
-                group_data_stats=b_stats,
-                group_col='borough',
-                group_values=['M', 'X', 'K', 'Q', 'R'],
-                group_names=BOROUGH_NAMES,
-                group_colors=BOROUGH_COLORS,
-                linestyle='--',
-                output_path=in_path('unmatched_avgrank_top3_min_list_length_borough_cohort_rank.png'),
-                overall_vals=overall_vals_cohort,
-                avg_rank_col='avg_rank_baseline_cohort',
-                show_baseline_cohort_overlay=False,
-            )
-        else:
-            print("Skipping borough cohort-rank figure: sweep_borough.csv has no "
-                  "avg_rank_baseline_cohort column (rerun nyc_list_len_welfare.py to add it).")
-
-        if 'avg_rank_baseline_cohort' in l_stats.columns:
-            plot_sweep(
-                df=df,
-                overall_df=df,
-                group_data_matched=l_matched,
-                group_data_stats=l_stats,
-                group_col='lottery_decile',
-                group_values=[f'{i}' for i in range(1, 11)],
-                group_names={f'{i}': f'{i}'.strip(' ()') for i in range(1, 11)},
-                group_colors=DECILE_COLORS,
-                linestyle=':',
-                output_path=in_path('unmatched_avgrank_top3_min_list_length_lottery_cohort_rank.png'),
-                overall_vals=overall_vals_cohort,
-                avg_rank_col='avg_rank_baseline_cohort',
-                show_baseline_cohort_overlay=False,
-            )
-        else:
-            print("Skipping lottery cohort-rank figure: sweep_lottery.csv has no "
-                  "avg_rank_baseline_cohort column (rerun nyc_list_len_welfare.py to add it).")
-    else:
-        print("Skipping cohort-rank figures: sweep_summary.csv has no avg_rank_baseline_cohort "
-              "column (rerun nyc_list_len_welfare.py to add it).")
 
     # Fig 6 — borough
     min_len_min = df['list_length_min'].min()

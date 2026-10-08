@@ -3,10 +3,7 @@ Fig. 8 style plot: cumulative assignment outcomes (share matched to top choice,
 one of top 5, or any listed school) under MTB and STB, broken out by Chilean
 Region.
 
-Both MTB and STB are averaged over --n_stb_runs independent lottery draws
-(MTB's per-school lottery and STB's single-draw-per-student lottery are each
-their own source of randomness, so both get a 95% CI band/error bars, not
-just STB).
+Both MTB and STB are averaged over --n_stb_runs independent lottery draws.
 
 Region labels use Chile's official Roman-numeral region codes (I-XVI,
 including Nuble as XVI). The mapping is keyed on the exact 'Region' string
@@ -112,24 +109,17 @@ def compute_region_buckets(student_ids, student_rankings, matches, student_regio
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--individual', default=None,
-                         help='Fixed --individual CSV (real or a pre-built synthetic one). Mutually '
-                              'exclusive with --params_pkl; when given, only the lottery is redrawn '
-                              'each replicate (preferences stay fixed).')
+                         help='Fixed --individual CSV. Mutually exclusive with --params_pkl.')
     parser.add_argument('--params_pkl', default=None,
-                         help='Fitted Mallows params.pkl. When given (with --real_individual), each '
-                              'replicate draws a FRESH synthetic preference sample AND a fresh lottery, '
-                              'together -- the CI then reflects both preference-sampling and lottery '
-                              'randomness, not just the lottery. Mutually exclusive with --individual.')
+                         help='Fitted Mallows params.pkl; resamples preferences + lottery each replicate. '
+                              'Mutually exclusive with --individual.')
     parser.add_argument('--real_individual', default=None,
                          help='Real indv_df, used with --params_pkl to calibrate synthetic resampling.')
     parser.add_argument('--subdivision_col', default='Region',
-                         help="Only used with --params_pkl: 'Region' or 'Provincia', matching how the "
-                              "saved params were fit.")
+                         help="Only used with --params_pkl: 'Region' or 'Provincia'.")
     parser.add_argument('--capacity', required=True)
     parser.add_argument('--n_stb_runs', type=int, default=10,
-                         help='Independent replicates for both MTB and STB. With --individual, only the '
-                              'lottery is redrawn each replicate; with --params_pkl, preferences are also '
-                              'freshly resampled each replicate.')
+                         help='Independent replicates for both MTB and STB.')
     parser.add_argument('--output', default='fig8_chile_region_cumulative.png')
     parser.add_argument('--seed', type=int, default=DATA_GENERATION_SEED)
     args = parser.parse_args()
@@ -167,11 +157,6 @@ def main():
 
     rng = np.random.default_rng(args.seed)
 
-    # MTB's per-school lottery is drawn fresh each call (student_lottery=None)
-    # and is just as random as STB's single draw, so it's averaged over
-    # n_stb_runs the same way STB is -- otherwise only STB would carry a CI.
-    # When --params_pkl is given, each replicate also draws a fresh synthetic
-    # preference sample, so the CI captures both sources of randomness.
     print(f"Running {args.n_stb_runs} MTB replicates (real priority, per-school lottery)...")
     mtb_runs = []
     for run in range(args.n_stb_runs):
@@ -220,9 +205,6 @@ def main():
         for seg, seg_label in [('top1', 'Top 1'), ('top2_5', 'Top 2-5'), ('top6p', 'Top 6+')]:
             vals = np.array([buckets.loc[r, seg] for r in regions])
             errs = np.array([ci95_buckets.loc[r, seg] for r in regions])
-            # yerr is centered at bottom+vals (the top of this stacked
-            # segment), showing the 95% CI on the cumulative height reached
-            # by that segment.
             ax.bar(x + offset, vals, width, bottom=bottoms, color=colors[seg],
                    label=f'{prefix} - {seg_label}', yerr=errs,
                    error_kw={'ecolor': '#000000', 'elinewidth': 1.6, 'capsize': 3.5})
