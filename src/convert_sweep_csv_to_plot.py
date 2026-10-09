@@ -129,8 +129,10 @@ def plot_overall_match_and_top3(df, overall_top3, b_matched, b_stats, output_pat
 def plot_sweep(df, overall_df, group_data_matched, group_data_stats,
                group_col, group_values, group_names, group_colors,
                linestyle, output_path, overall_vals=None, overall_top3=None,
-               avg_rank_col='avg_rank_baseline_cohort'):
-    """Panel order: % Matched, Top-3 Match Rate, Average Matched Rank (avg_rank_col)."""
+               avg_rank_col='avg_rank_baseline_cohort', overall_ci=None):
+    """Panel order: % Matched, Top-3 Match Rate, Average Matched Rank (avg_rank_col).
+    95% CI shown as shaded bands (overall_ci gives the Overall line's CI per panel
+    column key; group CI is read from f'{col}_ci95' columns in group_data_matched/stats)."""
     if avg_rank_col not in group_data_stats.columns:
         raise ValueError(
             f"{avg_rank_col!r} not found in group_data_stats -- rerun nyc_list_len_welfare.py "
@@ -149,7 +151,13 @@ def plot_sweep(df, overall_df, group_data_matched, group_data_stats,
         ax.plot(overall_df['list_length_min'], overall_vals[col],
                 marker='o', color='black', linewidth=LWIDTH_OVERALL,
                 markersize=MSIZE, label='Overall', zorder=5)
+        if overall_ci is not None and col in overall_ci:
+            mean_vals = overall_vals[col].to_numpy()
+            ci_vals = overall_ci[col].to_numpy()
+            ax.fill_between(overall_df['list_length_min'], mean_vals - ci_vals, mean_vals + ci_vals,
+                             color='black', alpha=0.15, zorder=4)
 
+    ci_col_by_panel = {0: 'pct_matched_ci95', 1: 'top_p_pct_ci95', 2: f'{avg_rank_col}_ci95'}
     for val in group_values:
         color = group_colors[val]
         label = group_names.get(val, val)
@@ -160,13 +168,22 @@ def plot_sweep(df, overall_df, group_data_matched, group_data_stats,
             axes[0].plot(gm['list_length_min'], gm['pct_matched'],
                          color=color, linewidth=LWIDTH_GROUP,
                          markersize=MSIZE, linestyle=linestyle, label=label)
+            if ci_col_by_panel[0] in gm.columns:
+                axes[0].fill_between(gm['list_length_min'], gm['pct_matched'] - gm[ci_col_by_panel[0]],
+                                     gm['pct_matched'] + gm[ci_col_by_panel[0]], color=color, alpha=0.15)
         if not gs.empty:
             axes[1].plot(gs['list_length_min'], gs['top_p_pct'],
                          color=color, linewidth=LWIDTH_GROUP,
                          markersize=MSIZE, linestyle=linestyle, label=label)
+            if ci_col_by_panel[1] in gs.columns:
+                axes[1].fill_between(gs['list_length_min'], gs['top_p_pct'] - gs[ci_col_by_panel[1]],
+                                     gs['top_p_pct'] + gs[ci_col_by_panel[1]], color=color, alpha=0.15)
             axes[2].plot(gs['list_length_min'], gs[avg_rank_col],
                          color=color, linewidth=LWIDTH_GROUP,
                          markersize=MSIZE, linestyle=linestyle, label=label)
+            if ci_col_by_panel[2] in gs.columns:
+                axes[2].fill_between(gs['list_length_min'], gs[avg_rank_col] - gs[ci_col_by_panel[2]],
+                                     gs[avg_rank_col] + gs[ci_col_by_panel[2]], color=color, alpha=0.15)
 
     for ax in axes:
         ax.relim()
@@ -201,10 +218,14 @@ def main(sweep_dir):
     max_p     = borough_df['p'].max()
     b_matched = borough_df[borough_df['p'] == max_p].copy()
     b_matched['pct_matched'] = b_matched['top_p_pct']
+    if 'top_p_pct_ci95' in b_matched.columns:
+        b_matched['pct_matched_ci95'] = b_matched['top_p_pct_ci95']
     b_stats   = borough_df[borough_df['p'] == 3].copy()
 
     l_matched = lottery_df[lottery_df['p'] == max_p].copy()
     l_matched['pct_matched'] = l_matched['top_p_pct']
+    if 'top_p_pct_ci95' in l_matched.columns:
+        l_matched['pct_matched_ci95'] = l_matched['top_p_pct_ci95']
     l_stats   = lottery_df[lottery_df['p'] == 3].copy()
 
     overall_top3 = (
@@ -225,6 +246,26 @@ def main(sweep_dir):
         'avg_rank':    df['avg_rank_baseline_cohort'],
     }
 
+    overall_ci = None
+    if 'top_p_pct_ci95' in borough_df.columns:
+        # Overall top-3 rate is a students-weighted average across boroughs; its CI
+        # combines each borough's independent SE the same way (weighted sum of variances).
+        def _combine_ci(g):
+            w = g['students'] / g['students'].sum()
+            se = g['top_p_pct_ci95'] / 1.96
+            return 1.96 * np.sqrt((w ** 2 * se ** 2).sum())
+        overall_top3_ci = (
+            borough_df[borough_df['p'] == 3]
+            .groupby('list_length_min')
+            .apply(_combine_ci)
+            .reset_index(name='top_p_pct_ci95')
+        )
+        overall_ci = {
+            'pct_matched': df['pct_matched_ci95'],
+            'top_p_pct':   overall_top3_ci['top_p_pct_ci95'],
+            'avg_rank':    df['avg_rank_baseline_cohort_ci95'],
+        }
+
     # Overall + per-borough match % vs top-3 match %, by minimum list length
     plot_overall_match_and_top3(
         df, overall_top3, b_matched, b_stats,
@@ -243,7 +284,8 @@ def main(sweep_dir):
         group_colors=BOROUGH_COLORS,
         linestyle='--',
         output_path=in_path('unmatched_avgrank_top3_min_list_length_borough.png'),
-        overall_vals=overall_vals
+        overall_vals=overall_vals,
+        overall_ci=overall_ci,
     )
 
     # Figure 2 — lottery decile breakdown
@@ -259,7 +301,8 @@ def main(sweep_dir):
         group_colors=DECILE_COLORS,
         linestyle=':',
         output_path=in_path('unmatched_avgrank_top3_min_list_length_lottery.png'),
-        overall_vals=overall_vals
+        overall_vals=overall_vals,
+        overall_ci=overall_ci,
     )
 
     # Fig 6 — borough

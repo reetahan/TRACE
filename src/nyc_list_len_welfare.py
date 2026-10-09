@@ -249,195 +249,218 @@ def _baseline_cohort_stats_by_group(cohort_df: pd.DataFrame, group_col: str) -> 
     return pd.DataFrame(rows)
 
 
+def _aggregate_runs_df(df: pd.DataFrame, group_cols: list) -> pd.DataFrame:
+    """Collapse a long per-run DataFrame to mean + 95% CI per group, one row per group."""
+    n_runs = df['run'].nunique()
+    value_cols = [c for c in df.columns if c not in group_cols and c != 'run']
+    grouped = df.groupby(group_cols)[value_cols]
+    mean_df = grouped.mean().reset_index()
+    ci_df = (1.96 * grouped.std() / np.sqrt(n_runs)).reset_index()
+    ci_df = ci_df.rename(columns={c: f'{c}_ci95' for c in value_cols})
+    return mean_df.merge(ci_df, on=group_cols)
+
+
 def run_sweep(params, lottery, df, match_stats_df, school_info_df,
               priority_config, district_to_borough,
-              min_lengths, output_dir, seed, n_jobs, save_ranking=False):
-
-    rng = np.random.default_rng(seed=seed)
+              min_lengths, output_dir, seed, n_jobs, save_ranking=False, n_runs=10):
 
     os.makedirs(output_dir, exist_ok=True)
-    summary_rows = []
     list_length_max = 15
-
-    # Sample preferences and attributes ONCE
-    print("Sampling preferences (fixed across all min_len values)...")
-    all_rankings, all_district_assignments, rng = sample_rankings(
-        params=params,
-        match_stats_df=match_stats_df,
-        sampling_n_jobs=n_jobs,
-        list_length_max=list_length_max,
-        seed=seed
-    )
-    print(f"  Sampled {len(all_rankings)} student rankings")
-
-    all_schools = df['School DBN'].unique()
-    borough_rows = [] 
-    lottery_rows = []
-
-
-    school_overrides = priority_config.get('school_overrides', {})
-    borough_swd_rates = {}
-    for prog_key, prog_data in school_overrides.items():
-        borough = prog_data.get('borough', '')
-        seats_ge = prog_data.get('seats_ge', 0)
-        seats_swd = prog_data.get('seats_swd', 0)
-        total = seats_ge + seats_swd
-        if total > 0 and borough:
-            if borough not in borough_swd_rates:
-                borough_swd_rates[borough] = {'swd': 0, 'total': 0}
-            borough_swd_rates[borough]['swd'] += seats_swd
-            borough_swd_rates[borough]['total'] += total
-
-    borough_swd_fractions = {
-        b: v['swd'] / v['total']
-        for b, v in borough_swd_rates.items()
-        if v['total'] > 0
-    }
-
-    fixed_student_attrs = _sample_student_attributes(
-        district_assignments=all_district_assignments,
-        district_to_borough=DISTRICT_TO_BOROUGH_MAPPING,
-        rng=rng,
-        borough_swd_fractions=borough_swd_fractions,
-        priority_config=priority_config,
-    )
-
-    natural_list_lengths, max_len_by_district = sample_natural_list_lengths(
-        all_rankings=all_rankings,
-        all_district_assignments=all_district_assignments,
-        list_length_mean=7,
-        list_length_std=2,
-        list_length_max=list_length_max,
-        rng=rng,
-    )
-
     ordered_min_lengths = sorted(min_lengths)
     baseline_min_len = ordered_min_lengths[0]
-    baseline_matched_student_ids = None
 
-    for min_len in ordered_min_lengths:
-        print(f"\n{'='*50}")
-        print(f"Running list_length_min={min_len}")
-        print(f"{'='*50}")
+    all_summary_rows = []
+    all_borough_rows = []
+    all_lottery_rows = []
 
-        agg, syn_rankings, syn_rankings_idx, matches_idx, syn_attrs = run_matching(
-            all_rankings=all_rankings,
-            all_district_assignments=all_district_assignments,
-            df=df,
-            school_info_df=school_info_df,
-            lottery_global=lottery,
-            list_length_min=min_len,
-            natural_list_lengths=natural_list_lengths,
-            max_len_by_district=max_len_by_district,
-            rng=rng,
-            priority_config=priority_config,
-            per_school_lottery=False,
-            student_attrs=fixed_student_attrs
+    for run in range(n_runs):
+        run_seed = seed + run
+        print(f"\n{'#'*50}")
+        print(f"Replicate {run + 1}/{n_runs} (seed={run_seed})")
+        print(f"{'#'*50}")
+
+        rng = np.random.default_rng(seed=run_seed)
+
+        print("Sampling preferences...")
+        all_rankings, all_district_assignments, rng = sample_rankings(
+            params=params,
+            match_stats_df=match_stats_df,
+            sampling_n_jobs=n_jobs,
+            list_length_max=list_length_max,
+            seed=run_seed
         )
-
-        if min_len == baseline_min_len:
-            baseline_matched_student_ids = np.where(matches_idx >= 0)[0]
-            print(
-                f"  Baseline (list_length_min={baseline_min_len}, no added minimum) "
-                f"matched cohort: {len(baseline_matched_student_ids)}/{len(matches_idx)} students"
-            )
-
-        if save_ranking and min_len == 1:
-            max_len = max(len(r) for r in syn_rankings)
-            ranking_rows = []
-            for i, (ranking, district) in enumerate(zip(syn_rankings, all_district_assignments)):
-                row = {'student_id': i, 'district': district}
-                for j in range(max_len):
-                    row[f'choice_{j+1}'] = ranking[j] if j < len(ranking) else None
-                ranking_rows.append(row)
-            pd.DataFrame(ranking_rows).to_csv(
-                os.path.join(output_dir, 'synthetic_rankings.csv'), index=False
-            )
-            print(f"Saved synthetic rankings to {output_dir}/synthetic_rankings.csv")
-
-
+        print(f"  Sampled {len(all_rankings)} student rankings")
 
         n_students = len(all_district_assignments)
-        lottery_1d = np.argsort(lottery[:n_students]).astype(np.float64) / n_students
+        run_lottery = rng.permutation(n_students) if n_runs > 1 else lottery
 
-        attr_df = syn_attrs if syn_attrs is not None else pd.DataFrame()
-        attr_df['district'] = list(all_district_assignments)
-        attr_df['lottery'] = lottery_1d
-        attr_df['lottery_decile'] = pd.qcut(lottery_1d, q=10, labels=[f'D{i}' for i in range(1, 11)])
+        school_overrides = priority_config.get('school_overrides', {})
+        borough_swd_rates = {}
+        for prog_key, prog_data in school_overrides.items():
+            borough = prog_data.get('borough', '')
+            seats_ge = prog_data.get('seats_ge', 0)
+            seats_swd = prog_data.get('seats_swd', 0)
+            total = seats_ge + seats_swd
+            if total > 0 and borough:
+                if borough not in borough_swd_rates:
+                    borough_swd_rates[borough] = {'swd': 0, 'total': 0}
+                borough_swd_rates[borough]['swd'] += seats_swd
+                borough_swd_rates[borough]['total'] += total
 
+        borough_swd_fractions = {
+            b: v['swd'] / v['total']
+            for b, v in borough_swd_rates.items()
+            if v['total'] > 0
+        }
 
-        welfare_results = evaluate_simulation_output(
-            sim_output={
-                'rankings_as_indices': syn_rankings_idx,
-                'matches_idx':         matches_idx,
-                'student_attributes':  attr_df,
-            },
-            categories=['district', 'borough', 'lottery_decile'],
-            output_dir=os.path.join(output_dir, f'min_len_{min_len}'),
+        fixed_student_attrs = _sample_student_attributes(
+            district_assignments=all_district_assignments,
+            district_to_borough=DISTRICT_TO_BOROUGH_MAPPING,
+            rng=rng,
+            borough_swd_fractions=borough_swd_fractions,
+            priority_config=priority_config,
         )
 
-        stats = welfare_results.rank_stats
-        matched = (matches_idx >= 0).sum()
-        n_total = len(matches_idx)
-
-        cohort_df = welfare_results.student_level[
-            welfare_results.student_level['student_id'].isin(baseline_matched_student_ids)
-        ]
-        cohort_stats = _rank_stats(cohort_df['match_rank'])
-        cohort_top3_pct = 100 * cohort_df['match_rank'].le(3).fillna(False).mean()
-        borough_cohort_stats = _baseline_cohort_stats_by_group(cohort_df, 'borough')
-        lottery_cohort_stats = _baseline_cohort_stats_by_group(cohort_df, 'lottery_decile')
-
-        print(f"  pct_matched: {stats['pct_matched']:.2f}%")
-        print(f"  avg_rank:    {stats['avg_rank']:.3f}")
-        print(f"  rank_var:    {stats['rank_variance']:.3f}")
-        print(
-            f"  avg_rank (baseline-matched cohort only): {cohort_stats['avg_rank']:.3f} "
-            f"({100 * cohort_df['matched'].mean():.2f}% of cohort still matched)"
+        natural_list_lengths, max_len_by_district = sample_natural_list_lengths(
+            all_rankings=all_rankings,
+            all_district_assignments=all_district_assignments,
+            list_length_mean=7,
+            list_length_std=2,
+            list_length_max=list_length_max,
+            rng=rng,
         )
 
-        summary_rows.append({
-            'list_length_min':           min_len,
-            'pct_matched':                round(stats['pct_matched'], 4),
-            'avg_rank':                   round(stats['avg_rank'], 4),
-            'rank_variance':              round(stats['rank_variance'], 4),
-            'n_matched':                  int(matched),
-            'n_total':                    int(n_total),
-            'avg_rank_baseline_cohort':   round(cohort_stats['avg_rank'], 4),
-            'pct_baseline_cohort_matched': round(100 * cohort_df['matched'].mean(), 4),
-            'top3_baseline_cohort':       round(cohort_top3_pct, 4),
-        })
+        baseline_matched_student_ids = None
 
-        borough_sweep = welfare_results.top_p_sweep_by_category.get('borough')
-        if borough_sweep is not None:
-            borough_sweep = borough_sweep.copy()
-            borough_sweep['list_length_min'] = min_len
-            borough_sweep = borough_sweep.merge(borough_cohort_stats, on='borough', how='left')
-            borough_rows.append(borough_sweep)
+        for min_len in ordered_min_lengths:
+            print(f"\n{'='*50}")
+            print(f"Run {run + 1}/{n_runs}: list_length_min={min_len}")
+            print(f"{'='*50}")
 
-        lottery_sweep = welfare_results.top_p_sweep_by_category.get('lottery_decile')
-        if lottery_sweep is not None:
-            lottery_sweep = lottery_sweep.copy()
-            lottery_sweep['list_length_min'] = min_len
-            lottery_sweep = lottery_sweep.merge(lottery_cohort_stats, on='lottery_decile', how='left')
-            lottery_rows.append(lottery_sweep)
+            agg, syn_rankings, syn_rankings_idx, matches_idx, syn_attrs = run_matching(
+                all_rankings=all_rankings,
+                all_district_assignments=all_district_assignments,
+                df=df,
+                school_info_df=school_info_df,
+                lottery_global=run_lottery,
+                list_length_min=min_len,
+                natural_list_lengths=natural_list_lengths,
+                max_len_by_district=max_len_by_district,
+                rng=rng,
+                priority_config=priority_config,
+                per_school_lottery=False,
+                student_attrs=fixed_student_attrs
+            )
 
-    lottery_df = pd.concat(lottery_rows, ignore_index=True) if lottery_rows else None
-    if lottery_df is not None:
+            if min_len == baseline_min_len:
+                baseline_matched_student_ids = np.where(matches_idx >= 0)[0]
+                print(
+                    f"  Baseline (list_length_min={baseline_min_len}, no added minimum) "
+                    f"matched cohort: {len(baseline_matched_student_ids)}/{len(matches_idx)} students"
+                )
+
+            if save_ranking and min_len == 1 and run == 0:
+                max_len = max(len(r) for r in syn_rankings)
+                ranking_rows = []
+                for i, (ranking, district) in enumerate(zip(syn_rankings, all_district_assignments)):
+                    row = {'student_id': i, 'district': district}
+                    for j in range(max_len):
+                        row[f'choice_{j+1}'] = ranking[j] if j < len(ranking) else None
+                    ranking_rows.append(row)
+                pd.DataFrame(ranking_rows).to_csv(
+                    os.path.join(output_dir, 'synthetic_rankings.csv'), index=False
+                )
+                print(f"Saved synthetic rankings to {output_dir}/synthetic_rankings.csv")
+
+            lottery_1d = np.argsort(run_lottery[:n_students]).astype(np.float64) / n_students
+
+            attr_df = syn_attrs if syn_attrs is not None else pd.DataFrame()
+            attr_df['district'] = list(all_district_assignments)
+            attr_df['lottery'] = lottery_1d
+            attr_df['lottery_decile'] = pd.qcut(lottery_1d, q=10, labels=[f'D{i}' for i in range(1, 11)])
+
+            welfare_results = evaluate_simulation_output(
+                sim_output={
+                    'rankings_as_indices': syn_rankings_idx,
+                    'matches_idx':         matches_idx,
+                    'student_attributes':  attr_df,
+                },
+                categories=['district', 'borough', 'lottery_decile'],
+                output_dir=os.path.join(output_dir, f'min_len_{min_len}', f'run_{run}'),
+            )
+
+            stats = welfare_results.rank_stats
+            matched = (matches_idx >= 0).sum()
+            n_total = len(matches_idx)
+
+            cohort_df = welfare_results.student_level[
+                welfare_results.student_level['student_id'].isin(baseline_matched_student_ids)
+            ]
+            cohort_stats = _rank_stats(cohort_df['match_rank'])
+            cohort_top3_pct = 100 * cohort_df['match_rank'].le(3).fillna(False).mean()
+            borough_cohort_stats = _baseline_cohort_stats_by_group(cohort_df, 'borough')
+            lottery_cohort_stats = _baseline_cohort_stats_by_group(cohort_df, 'lottery_decile')
+
+            print(f"  pct_matched: {stats['pct_matched']:.2f}%")
+            print(f"  avg_rank:    {stats['avg_rank']:.3f}")
+            print(f"  rank_var:    {stats['rank_variance']:.3f}")
+            print(
+                f"  avg_rank (baseline-matched cohort only): {cohort_stats['avg_rank']:.3f} "
+                f"({100 * cohort_df['matched'].mean():.2f}% of cohort still matched)"
+            )
+
+            all_summary_rows.append({
+                'run':                        run,
+                'list_length_min':            min_len,
+                'pct_matched':                round(stats['pct_matched'], 4),
+                'avg_rank':                   round(stats['avg_rank'], 4),
+                'rank_variance':              round(stats['rank_variance'], 4),
+                'n_matched':                  int(matched),
+                'n_total':                    int(n_total),
+                'avg_rank_baseline_cohort':   round(cohort_stats['avg_rank'], 4),
+                'pct_baseline_cohort_matched': round(100 * cohort_df['matched'].mean(), 4),
+                'top3_baseline_cohort':       round(cohort_top3_pct, 4),
+            })
+
+            borough_sweep = welfare_results.top_p_sweep_by_category.get('borough')
+            if borough_sweep is not None:
+                borough_sweep = borough_sweep.copy()
+                borough_sweep['run'] = run
+                borough_sweep['list_length_min'] = min_len
+                borough_sweep = borough_sweep.merge(borough_cohort_stats, on='borough', how='left')
+                all_borough_rows.append(borough_sweep)
+
+            lottery_sweep = welfare_results.top_p_sweep_by_category.get('lottery_decile')
+            if lottery_sweep is not None:
+                lottery_sweep = lottery_sweep.copy()
+                lottery_sweep['run'] = run
+                lottery_sweep['list_length_min'] = min_len
+                lottery_sweep = lottery_sweep.merge(lottery_cohort_stats, on='lottery_decile', how='left')
+                all_lottery_rows.append(lottery_sweep)
+
+    summary_long = pd.DataFrame(all_summary_rows)
+    summary_df = _aggregate_runs_df(summary_long, ['list_length_min'])
+    summary_path = os.path.join(output_dir, 'sweep_summary.csv')
+    summary_df.to_csv(summary_path, index=False)
+    print(f"\nSummary saved to {summary_path}")
+    print(summary_df.to_string(index=False))
+
+    borough_long = pd.concat(all_borough_rows, ignore_index=True) if all_borough_rows else None
+    borough_df = None
+    if borough_long is not None:
+        borough_df = _aggregate_runs_df(borough_long, ['list_length_min', 'p', 'borough'])
+        borough_path = os.path.join(output_dir, 'sweep_borough.csv')
+        borough_df.to_csv(borough_path, index=False)
+        print(f"Borough sweep saved to {borough_path}")
+
+    lottery_long = pd.concat(all_lottery_rows, ignore_index=True) if all_lottery_rows else None
+    lottery_df = None
+    if lottery_long is not None:
+        lottery_df = _aggregate_runs_df(lottery_long, ['list_length_min', 'p', 'lottery_decile'])
         lottery_path = os.path.join(output_dir, 'sweep_lottery.csv')
         lottery_df.to_csv(lottery_path, index=False)
         print(f"Lottery sweep saved to {lottery_path}")
 
-    summary_df = pd.DataFrame(summary_rows)
-    summary_path = os.path.join(output_dir, 'sweep_summary.csv')
-    summary_df.to_csv(summary_path, index=False)
-    borough_df = pd.concat(borough_rows, ignore_index=True) if borough_rows else None
-    if borough_df is not None:
-        borough_path = os.path.join(output_dir, 'sweep_borough.csv')
-        borough_df.to_csv(borough_path, index=False)
-        print(f"\nBorough sweep saved to {borough_path}")
-    print(f"\nSummary saved to {summary_path}")
-    print(summary_df.to_string(index=False))
     return summary_df, borough_df, lottery_df
 
 
@@ -446,6 +469,7 @@ def main():
     parser.add_argument('--params',      required=True)
     parser.add_argument('--output_dir',  required=True)
     parser.add_argument('--min_lengths', type=int, nargs='+', default=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    parser.add_argument('--n_runs',      type=int, default=10)
     parser.add_argument('--seed',        type=int, default=DATA_GENERATION_SEED)
     parser.add_argument('--n_jobs',      type=int, default=32)
     parser.add_argument('--df_filepath', type=str, default=None)
@@ -507,7 +531,8 @@ def main():
         output_dir=args.output_dir,
         seed=args.seed,
         n_jobs=args.n_jobs,
-        save_ranking=args.save_ranking
+        save_ranking=args.save_ranking,
+        n_runs=args.n_runs,
     )
 
 
