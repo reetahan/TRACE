@@ -273,6 +273,19 @@ def make_diff_bar_plot(
     labels = [str(p) for p in ps] + ['Unm.']
     x = np.arange(len(labels))
 
+    dump = pd.DataFrame({
+        'label':      labels,
+        'stb_mean':   [stb['mean'][p] for p in ps] + [stb_un['mean']],
+        'stb_ci95':   [stb['ci95'][p] for p in ps] + [stb_un['ci95']],
+        'mtb_mean':   [mtb['mean'][p] for p in ps] + [mtb_un['mean']],
+        'mtb_ci95':   [mtb['ci95'][p] for p in ps] + [mtb_un['ci95']],
+        'diff':       diffs,
+        'diff_ci95':  diff_ci95,
+    })
+    dump_path = output_path.rsplit('.', 1)[0] + '.csv'
+    dump.to_csv(dump_path, index=False)
+    print(f"Saved: {dump_path}")
+
     STB_COLOR = '#1a2f6e'   # navy: STB better
     MTB_COLOR = '#c1652f'   # orange: MTB better
 
@@ -289,8 +302,8 @@ def make_diff_bar_plot(
 
     ax.set_xticks(x)
     ax.set_xticklabels(labels)
-    ax.set_xlabel('Top-p threshold / Match status', fontsize=12)
-    ax.set_ylabel('pp (positive = STB better)', fontsize=12)
+    ax.set_xlabel('Top-$p$ Match Rate ($W_p$) / Unmatched ($W_{\\mathrm{unmatch}}$)', fontsize=12)
+    ax.set_ylabel('STB - MTB (pp)', fontsize=12)
 
     bar_tops = [d + e for d, e in zip(diffs, diff_ci95)] + [0]
     bar_bottoms = [d - e for d, e in zip(diffs, diff_ci95)] + [0]

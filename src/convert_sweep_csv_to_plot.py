@@ -199,7 +199,7 @@ def plot_sweep(df, overall_df, group_data_matched, group_data_stats,
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, fontsize=LEGEND_FONT, loc='lower center',
                bbox_to_anchor=(0.5, 1.0), ncol=len(labels), frameon=True)
-    fig.subplots_adjust(top=0.85)
+    fig.subplots_adjust(top=0.92)
 
     fig.savefig(output_path, dpi=200, bbox_inches='tight')
     plt.close(fig)

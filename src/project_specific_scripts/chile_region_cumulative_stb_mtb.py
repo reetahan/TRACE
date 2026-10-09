@@ -189,6 +189,15 @@ def main():
 
     regions = [r for r in ROMAN_ORDER if r in mtb_buckets.index and r in stb_buckets.index]
 
+    dump_rows = []
+    for buckets, ci95_buckets, prefix in [(stb_buckets, stb_ci95, 'STB'), (mtb_buckets, mtb_ci95, 'MTB')]:
+        merged = buckets.loc[regions].join(ci95_buckets.loc[regions], rsuffix='_ci95')
+        merged['condition'] = prefix
+        dump_rows.append(merged.reset_index().rename(columns={'index': 'region'}))
+    dump_path = args.output.rsplit('.', 1)[0] + '.csv'
+    pd.concat(dump_rows, ignore_index=True).to_csv(dump_path, index=False)
+    print(f"Saved: {dump_path}")
+
     # ── plot ──────────────────────────────────────────────────────────────
     STB_COLORS = {'top1': '#1a2f6e', 'top2_5': '#3f6fd6', 'top6p': '#a9c0f0'}
     MTB_COLORS = {'top1': '#7a2a10', 'top2_5': '#c1652f', 'top6p': '#f0c19b'}
@@ -215,7 +224,7 @@ def main():
     ax.set_xlabel('Region', fontsize=12)
     ax.set_ylabel('Match Rate (%)', fontsize=12)
     ax.set_ylim(0, 100)
-    ax.legend(ncol=6, fontsize=9, loc='upper center', bbox_to_anchor=(0.5, 1.15), frameon=False)
+    ax.legend(ncol=6, fontsize=12, loc='upper center', bbox_to_anchor=(0.5, 1.15), frameon=False)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 

@@ -21,6 +21,24 @@ from chilean_real_welfare_comparison import (
 
 N_DECILES = 10
 
+AGG_TO_SOURCE = {
+    'min': 'min_topk',
+    'median': 'median_topk',
+    'mean': 'mean_topk',
+    'rank_weighted_avg': 'rank_weighted_topk',
+    'first_choice': 'first_choice',
+    'matched_school': 'matched_school',
+}
+CONDENSED_AGGS = ['median', 'mean', 'rank_weighted_avg', 'first_choice', 'matched_school']
+AGG_TITLES = {
+    'min': 'Min (top-5)',
+    'median': 'Median (top-5)',
+    'mean': 'Mean (top-5)',
+    'rank_weighted_avg': 'Rank-weighted avg (top-5)',
+    'first_choice': 'First choice',
+    'matched_school': 'Matched school',
+}
+
 
 def compute_student_records(student_ids, student_rankings, matches, lottery_df, decile_source, topk=5):
     """
@@ -107,6 +125,81 @@ def decile_metrics(df):
     return pd.DataFrame(rows).set_index('decile')
 
 
+def run_replicates(get_indv_df_for_replicate, school_table, rng, n_runs, agg_names, topk):
+    """
+    Runs n_runs replicates once. Each replicate matches STB once and MTB once,
+    then computes decile metrics for every name in agg_names from that SAME
+    MTB match -- MTB is never re-run per aggregation. Returns
+    (stats, decile_value_pool) where stats has keys 'STB' plus every agg_name,
+    each {'mean': df, 'ci95': df}.
+    """
+    metrics_by_name = {'STB': [], **{name: [] for name in agg_names}}
+    decile_value_pool = {'STB': [], **{name: [] for name in agg_names}}
+
+    for run in range(n_runs):
+        print(f"Run {run + 1}/{n_runs}...")
+        indv_df = get_indv_df_for_replicate(rng)
+        applications_long = build_applications_long(indv_df)
+        all_student_ids = sorted(applications_long['mrun'].unique().tolist())
+        if run == 0:
+            print(f"  Students: {len(all_student_ids):,}")
+
+        student_lottery = {sid: float(rng.random()) for sid in all_student_ids}
+        student_ids, rankings, matches, lottery_df = run_matching(
+            applications_long, school_table, rng,
+            student_lottery=student_lottery, return_lottery_df=True,
+        )
+        df = compute_student_records(student_ids, rankings, matches, lottery_df, 'single')
+        metrics_by_name['STB'].append(decile_metrics(df))
+        decile_value_pool['STB'].append(df['decile_val'].to_numpy())
+
+        student_ids, rankings, matches, lottery_df = run_matching(
+            applications_long, school_table, rng,
+            student_lottery=None, return_lottery_df=True,
+        )
+        for name in agg_names:
+            df = compute_student_records(student_ids, rankings, matches, lottery_df,
+                                          AGG_TO_SOURCE[name], topk=topk)
+            metrics_by_name[name].append(decile_metrics(df))
+            decile_value_pool[name].append(df['decile_val'].to_numpy())
+
+    stats = {}
+    for name, records in metrics_by_name.items():
+        grouped = pd.concat(records).groupby(level=0)
+        mean = grouped.mean()
+        std = grouped.std()
+        stats[name] = {'mean': mean, 'ci95': 1.96 * std / np.sqrt(n_runs)}
+
+    return stats, decile_value_pool
+
+
+DECILE_COLORS = {'pct_unmatched': '#111111', 'top1_pct': '#1565C0', 'top5_pct': '#AD1457', 'avg_rank': '#D4A017'}
+DECILE_LABELS = {'pct_unmatched': 'Unmatched', 'top1_pct': 'Top-1', 'top5_pct': 'Top-5', 'avg_rank': 'Avg Rank'}
+DECILE_STYLES = {'STB': '-', 'MTB': '--'}
+DECILE_MARKERS = {'pct_unmatched': 'o', 'top1_pct': 's', 'top5_pct': '^', 'avg_rank': 'D'}
+
+
+def plot_decile_axes(ax, ax2, stats, mtb_name, deciles, markersize=6, linewidth=1.8, capsize=5, capthick=2):
+    """Draw STB + stats[mtb_name] (MTB) errorbar lines onto ax (match rate) / ax2 (avg rank)."""
+    for cond, name in [('STB', 'STB'), ('MTB', mtb_name)]:
+        for metric in ['pct_unmatched', 'top1_pct', 'top5_pct']:
+            mean_vals = stats[name]['mean'][metric].reindex(deciles)
+            ci_vals = stats[name]['ci95'][metric].reindex(deciles)
+            ax.errorbar(deciles, mean_vals, yerr=ci_vals,
+                        color=DECILE_COLORS[metric], linestyle=DECILE_STYLES[cond], marker=DECILE_MARKERS[metric],
+                        markersize=markersize, linewidth=linewidth,
+                        ecolor='#000000', elinewidth=capthick, capsize=capsize, capthick=capthick, zorder=6)
+        mean_vals = stats[name]['mean']['avg_rank'].reindex(deciles)
+        ci_vals = stats[name]['ci95']['avg_rank'].reindex(deciles)
+        ax2.errorbar(deciles, mean_vals, yerr=ci_vals,
+                    color=DECILE_COLORS['avg_rank'], linestyle=DECILE_STYLES[cond], marker=DECILE_MARKERS['avg_rank'],
+                    markersize=markersize, linewidth=linewidth,
+                    ecolor='#000000', elinewidth=capthick, capsize=capsize, capthick=capthick, zorder=6)
+    ax2.tick_params(axis='y', colors=DECILE_COLORS['avg_rank'])
+    ax2.spines['right'].set_color(DECILE_COLORS['avg_rank'])
+    ax.spines['top'].set_visible(False)
+
+
 def plot_decile_value_distributions(stb_vals, mtb_vals, output_path):
     """Overlaid histograms of the raw, pre-qcut decile-bucketing value for STB vs MTB."""
     fig, ax = plt.subplots(figsize=(9, 5))
@@ -160,17 +253,14 @@ def main():
                          help='Defaults to fig4_chile_lottery_decile_<agg tag>.png.')
     parser.add_argument('--output_dist', default=None,
                          help='Defaults to fig4_decile_value_distributions_<agg tag>.png.')
+    parser.add_argument('--condensed', action='store_true',
+                         help='Instead of the single --mtb_decile_agg figure, produce one multi-panel '
+                              'figure with all OTHER aggregations (CONDENSED_AGGS) as subplots, sharing '
+                              'one legend. Skips the distribution plot / CSV dump / console diagnostics.')
+    parser.add_argument('--output_condensed', default='fig4_chile_lottery_decile_condensed.png')
     parser.add_argument('--seed', type=int, default=DATA_GENERATION_SEED)
     args = parser.parse_args()
 
-    AGG_TO_SOURCE = {
-        'min': 'min_topk',
-        'median': 'median_topk',
-        'mean': 'mean_topk',
-        'rank_weighted_avg': 'rank_weighted_topk',
-        'first_choice': 'first_choice',
-        'matched_school': 'matched_school',
-    }
     mtb_decile_source = AGG_TO_SOURCE[args.mtb_decile_agg]
     uses_topk = mtb_decile_source.endswith('_topk')
     agg_tag = f'{args.mtb_decile_agg}_k{args.mtb_decile_topk}' if uses_topk else args.mtb_decile_agg
@@ -210,12 +300,58 @@ def main():
 
     print(f"  Schools: {len(school_table):,}")
     print(f"  Mode: {'fixed --individual, lottery-only CI' if fixed_indv_df is not None else 'resampling preferences + lottery each replicate'}")
+
+    rng = np.random.default_rng(args.seed)
+
+    if args.condensed:
+        print(f"  Condensed aggregations: {CONDENSED_AGGS}")
+        print(f"  Output: {args.output_condensed}")
+        stats, _ = run_replicates(get_indv_df_for_replicate, school_table, rng, args.n_runs,
+                                   CONDENSED_AGGS, args.mtb_decile_topk)
+        deciles = list(range(1, N_DECILES + 1))
+
+        fig, axes = plt.subplots(2, 3, figsize=(16, 9))
+        axes_flat = axes.flatten()
+        twin_axes = []
+        for i, name in enumerate(CONDENSED_AGGS):
+            ax = axes_flat[i]
+            ax2 = ax.twinx()
+            twin_axes.append(ax2)
+            plot_decile_axes(ax, ax2, stats, name, deciles,
+                              markersize=4, linewidth=1.2, capsize=3, capthick=1)
+            ax.set_title(AGG_TITLES[name], fontsize=11)
+            ax.set_xlabel('Lottery Decile', fontsize=9)
+            ax.set_xticks(deciles)
+            ax.tick_params(axis='both', labelsize=8)
+            ax2.tick_params(axis='y', labelsize=8)
+            ax.margins(y=0.08)
+            ax2.margins(y=0.08)
+        axes_flat[-1].axis('off')
+
+        axes_flat[0].set_ylabel('Match Rate (%)', fontsize=10)
+        axes_flat[3].set_ylabel('Match Rate (%)', fontsize=10)
+        twin_axes[2].set_ylabel('Avg Rank (matched)', fontsize=10, color=DECILE_COLORS['avg_rank'])
+        twin_axes[4].set_ylabel('Avg Rank (matched)', fontsize=10, color=DECILE_COLORS['avg_rank'])
+
+        metric_handles = [
+            plt.Line2D([], [], color=DECILE_COLORS[m], marker=DECILE_MARKERS[m], linestyle='-', label=DECILE_LABELS[m])
+            for m in ['pct_unmatched', 'top1_pct', 'top5_pct', 'avg_rank']
+        ]
+        style_handles = [plt.Line2D([], [], color='gray', linestyle=DECILE_STYLES[c], label=c) for c in ['STB', 'MTB']]
+        all_handles = metric_handles + style_handles
+        fig.legend(handles=all_handles, loc='lower center', bbox_to_anchor=(0.5, 1.0),
+                   ncol=len(all_handles), fontsize=11, frameon=False)
+
+        fig.tight_layout(rect=[0, 0, 1, 0.93])
+        fig.savefig(args.output_condensed, dpi=200, bbox_inches='tight')
+        plt.close(fig)
+        print(f"Saved: {args.output_condensed}")
+        return
+
     topk_note = f", topk={args.mtb_decile_topk}" if uses_topk else ""
     print(f"  MTB decile aggregation: {args.mtb_decile_agg} ({mtb_decile_source}{topk_note})")
     print(f"  Output: {args.output}")
     print(f"  Output (distribution diagnostic): {args.output_dist}")
-
-    rng = np.random.default_rng(args.seed)
 
     metrics_by_condition = {'STB': [], 'MTB': []}
     decile_value_pool = {'STB': [], 'MTB': []}
@@ -257,6 +393,15 @@ def main():
         np.concatenate(decile_value_pool['MTB']),
         args.output_dist,
     )
+
+    dump_rows = []
+    for cond in ['STB', 'MTB']:
+        merged = stats[cond]['mean'].join(stats[cond]['ci95'], rsuffix='_ci95')
+        merged['condition'] = cond
+        dump_rows.append(merged.reset_index())
+    dump_path = args.output.rsplit('.', 1)[0] + '.csv'
+    pd.concat(dump_rows, ignore_index=True).to_csv(dump_path, index=False)
+    print(f"Saved: {dump_path}")
 
     print("\nCI half-width (95%, pp) across deciles -- if these are all near-zero,")
     print("the shaded bands are legitimately too thin to see at this scale, not a bug:")
@@ -305,10 +450,12 @@ def main():
 
     ax.set_xlabel('Lottery Decile', fontsize=12)
     ax.set_ylabel('Match Rate (%)', fontsize=12)
-    ax2.set_ylabel('Average Rank', fontsize=12)
+    ax2.set_ylabel('Avg Rank (matched)', fontsize=12, color=COLORS['avg_rank'])
     ax.set_xticks(deciles)
     ax.margins(y=0.08)
     ax2.margins(y=0.08)
+    ax2.tick_params(axis='y', colors=COLORS['avg_rank'])
+    ax2.spines['right'].set_color(COLORS['avg_rank'])
     ax.spines['top'].set_visible(False)
 
     metric_handles = [
@@ -316,11 +463,11 @@ def main():
         for m in ['pct_unmatched', 'top1_pct', 'top5_pct', 'avg_rank']
     ]
     style_handles = [plt.Line2D([], [], color='gray', linestyle=STYLES[c], label=c) for c in ['STB', 'MTB']]
-    leg1 = ax.legend(handles=metric_handles, loc='upper left', fontsize=10, frameon=False)
-    ax.add_artist(leg1)
-    ax.legend(handles=style_handles, loc='upper right', fontsize=10, frameon=False)
+    all_handles = metric_handles + style_handles
+    fig.legend(handles=all_handles, loc='lower center', bbox_to_anchor=(0.5, 1.0),
+               ncol=len(all_handles), fontsize=10, frameon=False)
 
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 1, 0.92])
     fig.savefig(args.output, dpi=200, bbox_inches='tight')
     plt.close(fig)
     print(f"Saved: {args.output}")

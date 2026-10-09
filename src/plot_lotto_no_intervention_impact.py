@@ -69,6 +69,11 @@ def main():
 
     print(mean.to_string())
 
+    dump = mean.join(ci95, rsuffix='_ci95')
+    dump_path = os.path.join(args.dir, "min_len_1/lottery_distributions.csv")
+    dump.to_csv(dump_path)
+    print(f"Saved: {dump_path}")
+
     overall_match_rate = 100.0 - mean['pct_unmatched'].mean()
     d1 = mean.loc['D1', 'top5_pct']
     d10 = mean.loc['D10', 'top5_pct']
@@ -84,29 +89,32 @@ def main():
     fig, ax1 = plt.subplots(figsize=(12, 5))
     ax2 = ax1.twinx()
 
+    COLOR_UNMATCHED, COLOR_TOP1, COLOR_TOP5, COLOR_AVGRANK = '#111111', '#1565C0', '#AD1457', '#D4A017'
+
     # Left axis — match rates (%)
     ax1.errorbar(x, mean['pct_unmatched'], yerr=ci95['pct_unmatched'], marker='o', linewidth=LWIDTH,
-         markersize=MSIZE, color='black', label='% Unmatched',
+         markersize=MSIZE, color=COLOR_UNMATCHED, label='Unmatched',
          ecolor='#000000', elinewidth=2, capsize=5, capthick=2)
     ax1.errorbar(x, mean['top1_pct'], yerr=ci95['top1_pct'], marker='s', linewidth=LWIDTH,
-            markersize=MSIZE, color='#2166ac', linestyle='--', label='Top-1 Match %',
+            markersize=MSIZE, color=COLOR_TOP1, label='Top-1',
             ecolor='#000000', elinewidth=2, capsize=5, capthick=2)
     ax1.errorbar(x, mean['top5_pct'], yerr=ci95['top5_pct'], marker='^', linewidth=LWIDTH,
-            markersize=MSIZE, color='#4393c3', linestyle='--', label='Top-5 Match %',
+            markersize=MSIZE, color=COLOR_TOP5, label='Top-5',
             ecolor='#000000', elinewidth=2, capsize=5, capthick=2)
 
     # Right axis — average rank
     ax2.errorbar(x, mean['avg_rank'], yerr=ci95['avg_rank'], marker='D', linewidth=LWIDTH,
-             markersize=MSIZE, color='#b2182b', linestyle=':',
-             label='Avg Rank (matched)',
+             markersize=MSIZE, color=COLOR_AVGRANK,
+             label='Avg Rank',
              ecolor='#000000', elinewidth=2, capsize=5, capthick=2)
 
     ax1.set_xticks(x)
     ax1.set_xticklabels([d.replace('D', '') for d in DECILE_LABELS], fontsize=FONT)
     ax1.set_ylabel('Match Rate (%)', fontsize=FONT)
-    ax2.set_ylabel('Average Rank', fontsize=FONT)
+    ax2.set_ylabel('Avg Rank (matched)', fontsize=FONT, color=COLOR_AVGRANK)
     ax1.tick_params(axis='both', labelsize=FONT)
-    ax2.tick_params(axis='both', labelsize=FONT)
+    ax2.tick_params(axis='y', labelsize=FONT, colors=COLOR_AVGRANK)
+    ax2.spines['right'].set_color(COLOR_AVGRANK)
     ax1.set_ylim(bottom=0)
 
     # Combined legend, single line, above the plot
@@ -115,7 +123,7 @@ def main():
     all_lines = lines1 + lines2
     all_labels = labels1 + labels2
     fig.legend(all_lines, all_labels, fontsize=LEGEND_FONT, loc='lower center',
-               bbox_to_anchor=(0.5, 1.0), ncol=len(all_labels), frameon=True)
+               bbox_to_anchor=(0.5, 1.0), ncol=len(all_labels), frameon=False)
     fig.subplots_adjust(top=0.85)
 
     fig.savefig(output, dpi=200, bbox_inches='tight')
