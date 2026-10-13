@@ -41,6 +41,8 @@ def run_chilean_data_experiment(
     exp_name=None,
     loss_top_p=None,
     loss_include_unmatched=True,
+    init_phis=None,
+    diag_sigma=False,
 ):
 
 
@@ -104,6 +106,8 @@ def run_chilean_data_experiment(
         raw_capacity_df=school_cap_df,
         loss_top_p=loss_top_p,
         loss_include_unmatched=loss_include_unmatched,
+        init_phis=init_phis,
+        diag_sigma=diag_sigma,
     )
 
     params = experiment_results.params
@@ -182,6 +186,12 @@ if __name__ == "__main__":
                               'Mutually exclusive with --loss_top_p.')
     parser.add_argument('--loss_exclude_unmatched', action='store_true',
                          help='Exclude the unmatched-rate term from the EM loss (included by default).')
+    parser.add_argument('--init_phis', type=float, nargs='+', default=None,
+                         help='Override the random phi initialization with these K values '
+                              '(e.g. --init_phis 0.367 0.380 0.428 0.569 0.902 0.979). Must have length K.')
+    parser.add_argument('--diag_sigma', action='store_true',
+                         help='Log per-district Sigma diagonal / diff / Mahalanobis distance on every '
+                              'phi evaluation (for debugging restricted-moment loss degeneracy).')
     args = parser.parse_args()
 
     if args.loss_unmatched_only and args.loss_exclude_unmatched:
@@ -206,4 +216,6 @@ if __name__ == "__main__":
         exp_name=args.exp_name,
         loss_top_p=loss_top_p,
         loss_include_unmatched=not args.loss_exclude_unmatched,
+        init_phis=args.init_phis,
+        diag_sigma=args.diag_sigma,
     )
