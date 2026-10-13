@@ -129,7 +129,8 @@ def plot_overall_match_and_top3(df, overall_top3, b_matched, b_stats, output_pat
 def plot_sweep(df, overall_df, group_data_matched, group_data_stats,
                group_col, group_values, group_names, group_colors,
                linestyle, output_path, overall_vals=None, overall_top3=None,
-               avg_rank_col='avg_rank_baseline_cohort', overall_ci=None):
+               avg_rank_col='avg_rank_baseline_cohort', overall_ci=None,
+               legend_frameon=True, legend_y=0.99, subplots_top=0.99):
     """Panel order: % Matched, Top-3 Match Rate, Average Matched Rank (avg_rank_col).
     95% CI shown as shaded bands (overall_ci gives the Overall line's CI per panel
     column key; group CI is read from f'{col}_ci95' columns in group_data_matched/stats)."""
@@ -198,8 +199,8 @@ def plot_sweep(df, overall_df, group_data_matched, group_data_stats,
 
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, fontsize=LEGEND_FONT, loc='lower center',
-               bbox_to_anchor=(0.5, 1.0), ncol=len(labels), frameon=True)
-    fig.subplots_adjust(top=0.92)
+               bbox_to_anchor=(0.5, legend_y), ncol=len(labels), frameon=legend_frameon, borderaxespad=0.1)
+    fig.subplots_adjust(top=subplots_top)
 
     fig.savefig(output_path, dpi=200, bbox_inches='tight')
     plt.close(fig)
@@ -286,6 +287,7 @@ def main(sweep_dir):
         output_path=in_path('unmatched_avgrank_top3_min_list_length_borough.png'),
         overall_vals=overall_vals,
         overall_ci=overall_ci,
+        legend_frameon=False,
     )
 
     # Figure 2 — lottery decile breakdown
@@ -303,6 +305,9 @@ def main(sweep_dir):
         output_path=in_path('unmatched_avgrank_top3_min_list_length_lottery.png'),
         overall_vals=overall_vals,
         overall_ci=overall_ci,
+        legend_frameon=False,
+        legend_y=0.95,
+        subplots_top=0.95,
     )
 
     # Fig 6 — borough

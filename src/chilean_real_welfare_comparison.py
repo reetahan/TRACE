@@ -1,29 +1,4 @@
-"""
-plot_chile_welfare.py
 
-Compares welfare under MTB vs STB for:
-  - All students
-  - Female students
-  - Non-female students
-
-Uses real individual-level Chilean preference data (indv_df).
-Preference lists and priority attributes are fixed and real.
-Only the lottery mechanism changes between MTB and STB, and both are
-averaged over --n_stb_runs independent lottery draws (95% CI shown as a
-shaded band / error bars) -- the interval reflects uncertainty from the
-lottery's own randomness, holding real preferences fixed, not sampling
-uncertainty about the student population.
-
-Usage:
-    python plot_chile_welfare.py \
-        --individual <path_to_indv_df> \
-        --capacity   <path_to_capacity_df> \
-        --output_uncond welfare_uncond.png \
-        --output_cond   welfare_cond.png \
-        --n_stb_runs 10 \
-        --max_p      10 \
-        --seed       42
-"""
 
 import argparse
 import pickle
@@ -46,7 +21,6 @@ from chile_priority_attributes import (
 from gale_shapley import gale_shapley_per_school_numba_wrapper
 
 
-# ── data loading ───────────────────────────────────────────────────────────
 
 def load_df(path: str) -> pd.DataFrame:
     if path.endswith('.csv'):
@@ -83,7 +57,6 @@ def build_student_attrs(indv_df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-# ── matching ───────────────────────────────────────────────────────────────
 
 def run_matching(
     applications_long: pd.DataFrame,
@@ -92,15 +65,7 @@ def run_matching(
     student_lottery: Optional[Dict[str, float]] = None,
     return_lottery_df: bool = False,
 ):
-    """
-    Run Chile DA with real priority attributes.
-    student_lottery=None  -> MTB (independent per-school draws)
-    student_lottery=dict  -> STB (single draw per student, shared across schools)
-    Returns student_ids, student_rankings, matches_idx.
-    If return_lottery_df=True, also returns the long-form per-(student, school)
-    application table (with the per-application 'lottery' draw and
-    'preference_number'), needed to derive per-student lottery-position stats.
-    """
+
     student_ids, student_rankings, dense_scores, lottery_df, capacities, _, _ = \
         _assign_school_level_priority_tiers_and_dense_scores(
             applications_long, school_table, rng,
@@ -113,8 +78,6 @@ def run_matching(
         return student_ids, student_rankings, matches, lottery_df
     return student_ids, student_rankings, matches
 
-
-# ── welfare computation ────────────────────────────────────────────────────
 
 def compute_top_p_curves(
     student_ids: np.ndarray,
@@ -184,9 +147,6 @@ def aggregate_scalar_runs(values: List[float]) -> Dict[str, float]:
     n = len(arr)
     std = float(arr.std())
     return {'mean': float(arr.mean()), 'std': std, 'ci95': 1.96 * std / np.sqrt(n)}
-
-
-# ── plotting ───────────────────────────────────────────────────────────────
 
 COLORS = {
     'all':       '#2c3e50',
@@ -300,9 +260,10 @@ def make_diff_bar_plot(
     if flip_idx is not None:
         ax.axvline(flip_idx - 0.5, color='gray', linestyle=':', linewidth=1)
 
+    tick_labels = [f'$W_{{{p}}}$' for p in ps] + ['$W_{\\mathrm{unmatch}}$']
     ax.set_xticks(x)
-    ax.set_xticklabels(labels)
-    ax.set_xlabel('Top-$p$ Match Rate ($W_p$) / Unmatched ($W_{\\mathrm{unmatch}}$)', fontsize=12)
+    ax.set_xticklabels(tick_labels)
+    ax.set_xlabel('Matched Rank', fontsize=12)
     ax.set_ylabel('STB - MTB (pp)', fontsize=12)
 
     bar_tops = [d + e for d, e in zip(diffs, diff_ci95)] + [0]
@@ -323,8 +284,6 @@ def make_diff_bar_plot(
     plt.close(fig)
     print(f"Saved: {output_path}")
 
-
-# ── main ───────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser()

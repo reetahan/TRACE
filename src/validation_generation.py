@@ -399,6 +399,25 @@ if __name__ == '__main__':
         print("No district fit data found — check log format.")
         raise SystemExit(1)
 
+    block_rows = []
+    for d, vals in best_block.items():
+        n_stats_row = len(vals['obs'])
+        metrics_row = [f'top{p}' for p in range(1, n_stats_row)] + ['unmatched']
+        row = {'district': d}
+        for i, m in enumerate(metrics_row):
+            row[f'obs_{m}'] = vals['obs'][i]
+            row[f'sim_{m}'] = vals['sim'][i]
+            row[f'diff_{m}'] = vals['obs'][i] - vals['sim'][i]
+        block_rows.append(row)
+    pd.DataFrame(block_rows).to_csv(out_dir / f'{args.mode}_val_district_fit_1.csv', index=False)
+    print(f"Saved: {args.mode}_val_district_fit_1.csv")
+
+    if best_dist_util:
+        util_rows = [{'district': d, 'obs_util': v['obs'], 'sim_util': v['sim'],
+                      'diff_util': v['obs'] - v['sim']} for d, v in best_dist_util.items()]
+        pd.DataFrame(util_rows).to_csv(out_dir / f'{args.mode}_val_district_util_1.csv', index=False)
+        print(f"Saved: {args.mode}_val_district_util_1.csv")
+
     # Individual metric plots
     n_stats = len(next(iter(best_block.values()))['obs'])
     if n_stats == 4:

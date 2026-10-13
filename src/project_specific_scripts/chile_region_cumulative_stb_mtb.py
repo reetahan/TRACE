@@ -224,7 +224,7 @@ def main():
     ax.set_xlabel('Region', fontsize=12)
     ax.set_ylabel('Match Rate (%)', fontsize=12)
     ax.set_ylim(0, 100)
-    ax.legend(ncol=6, fontsize=12, loc='upper center', bbox_to_anchor=(0.5, 1.15), frameon=False)
+    ax.legend(ncol=3, fontsize=14, loc='upper center', bbox_to_anchor=(0.5, 1.1), frameon=False)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 

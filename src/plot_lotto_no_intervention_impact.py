@@ -124,7 +124,7 @@ def main():
     all_labels = labels1 + labels2
     fig.legend(all_lines, all_labels, fontsize=LEGEND_FONT, loc='lower center',
                bbox_to_anchor=(0.5, 1.0), ncol=len(all_labels), frameon=False)
-    fig.subplots_adjust(top=0.85)
+    fig.subplots_adjust(top=0.95)
 
     fig.savefig(output, dpi=200, bbox_inches='tight')
     plt.close(fig)

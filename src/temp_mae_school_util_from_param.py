@@ -137,6 +137,13 @@ def main():
     print(f"  Overall MAE:                 {overall_mae:.2f}%")
     print(f"──────────────────────────────────────────────\n")
 
+    util_csv_path = args.output.replace('.png', '_district_util_1.csv')
+    pd.DataFrame({
+        'district': districts, 'obs_util': obs_means, 'sim_util': sim_means,
+        'diff_util': diffs,
+    }).to_csv(util_csv_path, index=False)
+    print(f"Saved: {util_csv_path}")
+
 
     x = np.arange(len(districts))
     fig1, ax1 = plt.subplots(figsize=(11, 4))

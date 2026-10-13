@@ -342,7 +342,7 @@ def main():
         fig.legend(handles=all_handles, loc='lower center', bbox_to_anchor=(0.5, 1.0),
                    ncol=len(all_handles), fontsize=11, frameon=False)
 
-        fig.tight_layout(rect=[0, 0, 1, 0.93])
+        fig.tight_layout(rect=[0, 0, 1, 0.96])
         fig.savefig(args.output_condensed, dpi=200, bbox_inches='tight')
         plt.close(fig)
         print(f"Saved: {args.output_condensed}")
@@ -467,7 +467,7 @@ def main():
     fig.legend(handles=all_handles, loc='lower center', bbox_to_anchor=(0.5, 1.0),
                ncol=len(all_handles), fontsize=10, frameon=False)
 
-    fig.tight_layout(rect=[0, 0, 1, 0.92])
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
     fig.savefig(args.output, dpi=200, bbox_inches='tight')
     plt.close(fig)
     print(f"Saved: {args.output}")
