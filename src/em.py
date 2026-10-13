@@ -440,7 +440,8 @@ def EM_algorithm(df, match_stats_df, school_info_df,
                  sampling_n_jobs=32, max_iter_opt=5, per_school_lottery=False,
                  profile_timing=True, priority_config=None, district_to_region=None,
                  list_length_params=None, save_best_sample=False, max_p=None,
-                 raw_capacity_df=None, loss_top_p=None, loss_include_unmatched=True):
+                 raw_capacity_df=None, loss_top_p=None, loss_include_unmatched=True,
+                 init_phis=None, diag_sigma=False):
 
 
     cur_experiment_result = ExperimentResult()
@@ -459,7 +460,9 @@ def EM_algorithm(df, match_stats_df, school_info_df,
         log_and_print("  Timing instrumentation: ENABLED", log_file=outfile)
     
     rng_init = np.random.default_rng(seed)
-    params = initialize_parameters_global_mixture(districts, df, K, rng=rng_init)
+    params = initialize_parameters_global_mixture(districts, df, K, rng=rng_init, init_phis=init_phis)
+    if init_phis is not None:
+        log_and_print(f"  Global phis initialized from --init_phis override: {params['global_phis']}", log_file=outfile)
 
     observed_agg = extract_observed_aggregates(df, match_stats_df, max_p=max_p)
 
@@ -499,7 +502,7 @@ def EM_algorithm(df, match_stats_df, school_info_df,
             district_to_region=district_to_region, list_length_params=list_length_params,
             save_best_sample=save_best_sample, best_phis_seen=best_phis_seen, max_p=max_p,
             raw_capacity_df=raw_capacity_df, loss_top_p=loss_top_p,
-            loss_include_unmatched=loss_include_unmatched,
+            loss_include_unmatched=loss_include_unmatched, diag_sigma=diag_sigma,
         )
 
         log_and_print(f"Checking results of optimizing global mixture...", log_file=outfile)
@@ -571,7 +574,7 @@ def EM_algorithm(df, match_stats_df, school_info_df,
 
     return cur_experiment_result
 
-def initialize_parameters_global_mixture(districts, df, K=1, rng=None):
+def initialize_parameters_global_mixture(districts, df, K=1, rng=None, init_phis=None):
     """
     Initialize with global phis, district-specific sigmas
     """
@@ -579,8 +582,13 @@ def initialize_parameters_global_mixture(districts, df, K=1, rng=None):
         rng = np.random.default_rng()
 
     # Global mixture parameters (shared across districts)
-    global_phis = rng.beta(6, 1, K)
-    global_phis = np.clip(global_phis, 0.5, 0.99)
+    if init_phis is not None:
+        global_phis = np.asarray(init_phis, dtype=float).copy()
+        if len(global_phis) != K:
+            raise ValueError(f"init_phis has length {len(global_phis)}, expected K={K}")
+    else:
+        global_phis = rng.beta(6, 1, K)
+        global_phis = np.clip(global_phis, 0.5, 0.99)
     
     global_weights = np.ones(K) / K  # Uniform initially
     
@@ -614,7 +622,7 @@ def compute_log_likelihood_gaussian_all_districts(params_global, observed_agg,
                                                    list_length_params=None, save_best_sample=False,
                                                    profile_timing=True, lottery_fixed=None, max_p=None,
                                                    raw_capacity_df=None, loss_top_p=None,
-                                                   loss_include_unmatched=True):
+                                                   loss_include_unmatched=True, diag_sigma=False):
 
 
     t_total_start = time.perf_counter()
@@ -819,7 +827,16 @@ def compute_log_likelihood_gaussian_all_districts(params_global, observed_agg,
                 log_lik = -1e10
             else:
                 log_lik = -0.5 * mahalanobis_sq - 0.5 * log_det
-            
+
+            if diag_sigma:
+                log_and_print(
+                    f"      [DIAG] district={district} loss_dims={len(loss_target_indices)} "
+                    f"diag(Sigma)={np.round(np.diag(Sigma), 4).tolist()} "
+                    f"diff={np.round(diff, 2).tolist()} "
+                    f"mahalanobis_sq={mahalanobis_sq:.2f} log_det={log_det:.4f} log_lik={log_lik:.2f}",
+                    log_file=outfile,
+                )
+
             # Sanity check
             if np.isnan(log_lik) or np.isinf(log_lik):
                 log_and_print(f"Warning: Invalid log-likelihood for district {district}", log_file=outfile)
@@ -852,7 +869,8 @@ def optimize_global_mixture(params, observed_agg, df, match_stats_df,
                             profile_timing=True, priority_config=None,
                             district_to_region=None, list_length_params=None,
                             save_best_sample=False, best_phis_seen=None, max_p=None,
-                            raw_capacity_df=None, loss_top_p=None, loss_include_unmatched=True):
+                            raw_capacity_df=None, loss_top_p=None, loss_include_unmatched=True,
+                            diag_sigma=False):
 
     t_opt_start = time.perf_counter()
     K = len(params['global_phis'])
@@ -887,7 +905,7 @@ def optimize_global_mixture(params, observed_agg, df, match_stats_df,
                 profile_timing=profile_timing, priority_config=priority_config, district_to_region=district_to_region,
                 list_length_params=list_length_params, save_best_sample=save_best_sample, lottery_fixed=lottery_fixed, max_p=max_p,
                 raw_capacity_df=raw_capacity_df, loss_top_p=loss_top_p,
-                loss_include_unmatched=loss_include_unmatched,
+                loss_include_unmatched=loss_include_unmatched, diag_sigma=diag_sigma,
             )
             if total_log_lik > best_log_like_seen:
                 best_log_like_seen = total_log_lik
