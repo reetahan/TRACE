@@ -11,36 +11,10 @@ from util import log_and_print
 from constants import *
 from data_ingestion import extract_observed_aggregates
 from gale_shapley import compute_aggregates, gale_shapley_per_school_numba_wrapper
-from mallows import  _sample_students_chunk
+from mallows import  _sample_students_chunk, _resolve_loss_indices
 from list_length import sample_truncated_normal_lengths, sample_empirical_lengths
 from nyc_priority_attributes import run_nyc_priority_matching
 from chile_priority_attributes import prepare_chile_numba_inputs_from_rankings
-
-def _resolve_loss_indices(loss_top_p, loss_include_unmatched, max_p, n_stats):
-    """
-    Map (loss_top_p, loss_include_unmatched) to positional indices into the
-    match_stats vector used by the
-    EM loss. 
-    """
-    if loss_top_p is not None:
-        if max_p is None:
-            raise ValueError(
-                "loss_top_p requires max_p to be set explicitly"
-            )
-        invalid = [p for p in loss_top_p if not (1 <= p <= max_p)]
-        if invalid:
-            raise ValueError(
-                f"loss_top_p contains p values {invalid} outside the available range "
-                f"[1, {max_p}] (max_p={max_p})."
-            )
-        target_indices = [p - 1 for p in loss_top_p]
-    else:
-        target_indices = list(range(n_stats - 1))
-    if loss_include_unmatched:
-        target_indices = target_indices + [n_stats - 1]
-    if not target_indices:
-        raise ValueError("Loss metric selection is empty: set loss_top_p and/or loss_include_unmatched=True.")
-    return target_indices
 
 
 class ExperimentResult:
