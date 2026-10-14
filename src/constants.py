@@ -30,8 +30,13 @@ CHILE_PROVINCE_TO_REGION_MAPPING = {
     'Aysén': 'Región de Aysén del Gral.Ibañez del Campo', 'General Carrera': 'Región de Aysén del Gral.Ibañez del Campo',
     'Capitán Prat': 'Región de Aysén del Gral.Ibañez del Campo', 'Ultima Esperanza': 'Región de Magallanes y Antártica Chilena',
     'Magallanes': 'Región de Magallanes y Antártica Chilena', 'Tierra del Fuego': 'Región de Magallanes y Antártica Chilena', 
-    'Antártica Chilena': 'Región de Magallanes y Antártica Chilena', 'Santiago': 'Región Metropolitana de Santiago', 
-    'Cordillera': 'Región Metropolitana de Santiago', 'Chacabuco': 'Región Metropolitana de Santiago', 'Maipo': 'Región Metropolitana de Santiago', 
-    'Talagante': 'Región Metropolitana de Santiago', 'Melipilla': 'Región Metropolitana de Santiago', 
-    'Isla de Pascua': 'Región de Valparaíso'
+    'Antártica Chilena': 'Región de Magallanes y Antártica Chilena', 'Santiago': 'Región Metropolitana de Santiago',
+    'Cordillera': 'Región Metropolitana de Santiago', 'Chacabuco': 'Región Metropolitana de Santiago', 'Maipo': 'Región Metropolitana de Santiago',
+    'Talagante': 'Región Metropolitana de Santiago', 'Melipilla': 'Región Metropolitana de Santiago',
+    'Isla de Pascua': 'Región de Valparaíso',
+    # Santiago province is further split into 8 subregions in some runs
+    'Santiago_Centro': 'Región Metropolitana de Santiago', 'Santiago_Nor_Oriente': 'Región Metropolitana de Santiago',
+    'Santiago_Nor_Poniente': 'Región Metropolitana de Santiago', 'Santiago_Oriente': 'Región Metropolitana de Santiago',
+    'Santiago_Poniente': 'Región Metropolitana de Santiago', 'Santiago_Sur': 'Región Metropolitana de Santiago',
+    'Santiago_Sur_Oriente': 'Región Metropolitana de Santiago', 'Santiago_Sur_Poniente': 'Región Metropolitana de Santiago',
 }
