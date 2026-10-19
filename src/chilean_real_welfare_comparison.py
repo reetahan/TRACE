@@ -227,7 +227,9 @@ def make_diff_bar_plot(
 
     mtb_un = mtb_results[group]['unmatched']
     stb_un = stb_results[group]['unmatched']
-    diffs.append(mtb_un['mean'] - stb_un['mean'])  # flipped: lower unmatched is better
+    # Literal STB - MTB, matching the y-axis label and every other bar; real data has
+    # STB's unmatched rate higher than MTB's, so this comes out positive like the rest.
+    diffs.append(stb_un['mean'] - mtb_un['mean'])
     diff_ci95.append(float(np.sqrt(stb_un['ci95']**2 + mtb_un['ci95']**2)))
 
     labels = [str(p) for p in ps] + ['Unm.']

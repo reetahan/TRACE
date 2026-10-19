@@ -65,7 +65,7 @@ def place_labels_no_collision(ax, fig, entries):
 
 
 def make_scatter(fig, ax, nyc_data, chile_data, obs_col, sim_col, label, panel_caption,
-                 nyc_outlier_n, chile_outlier_n):
+                 nyc_outlier_n, chile_outlier_n, font_scale=1.0):
 
     nx_o = nyc_data[obs_col].values
     nx_s = nyc_data[sim_col].values
@@ -85,9 +85,9 @@ def make_scatter(fig, ax, nyc_data, chile_data, obs_col, sim_col, label, panel_c
     ax.set_xlim(lo, hi)
     ax.set_ylim(lo, hi)
     ax.set_box_aspect(1)
-    ax.set_xlabel(f'Observed {label}', fontsize=FONT)
-    ax.set_ylabel(f'Simulated {label}', fontsize=FONT)
-    ax.tick_params(labelsize=10)
+    ax.set_xlabel(f'Observed {label}', fontsize=FONT * font_scale)
+    ax.set_ylabel(f'Simulated {label}', fontsize=FONT * font_scale)
+    ax.tick_params(labelsize=10 * font_scale)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
@@ -162,3 +162,37 @@ if __name__ == '__main__':
     fig.savefig(out_path, dpi=180, bbox_inches='tight')
     plt.close(fig)
     print(f"Saved: {out_path}")
+
+    def print_mae(label, nyc_data, chile_data, obs_col, sim_col):
+        nyc_mae = (nyc_data[obs_col] - nyc_data[sim_col]).abs().mean()
+        chile_mae = (chile_data[obs_col] - chile_data[sim_col]).abs().mean()
+        combined = pd.concat([nyc_data[[obs_col, sim_col]], chile_data[[obs_col, sim_col]]])
+        all_mae = (combined[obs_col] - combined[sim_col]).abs().mean()
+        print(f"  {label}: NYC MAE={nyc_mae:.2f}pp, Chile MAE={chile_mae:.2f}pp, combined MAE={all_mae:.2f}pp")
+
+    print("\n=== MAE (|observed - simulated|) ===")
+    print_mae('Top-3 match rate', nyc_fit, chile_fit, 'obs_top3', 'sim_top3')
+    print_mae('Program utilization', nyc_util, chile_util, 'obs_util', 'sim_util')
+
+    # Separate single-panel versions of each, for standalone use.
+    for ax_label, nyc_data, chile_data, obs_col, sim_col, label, nyc_n, chile_n, fname in [
+        ('top3', nyc_fit, chile_fit, 'obs_top3', 'sim_top3', 'Top-3 Match Rate (%)',
+         args.nyc_top3_outliers, args.chile_top3_outliers, 'val_scatter_top3.png'),
+        ('util', nyc_util, chile_util, 'obs_util', 'sim_util', 'Program Utilization (%)',
+         args.nyc_util_outliers, args.chile_util_outliers, 'val_scatter_util.png'),
+    ]:
+        fig_single, ax_single = plt.subplots(figsize=(7, 6))
+        make_scatter(
+            fig_single, ax_single, nyc_data, chile_data,
+            obs_col=obs_col, sim_col=sim_col, label=label, panel_caption='',
+            nyc_outlier_n=nyc_n, chile_outlier_n=chile_n, font_scale=1.15,
+        )
+        ax_single.set_title('')
+        h, l = ax_single.get_legend_handles_labels()
+        ax_single.legend(h, l, fontsize=14, frameon=False, loc='upper left',
+                          markerscale=1.2, handletextpad=0.4)
+        fig_single.tight_layout()
+        single_path = out_dir / fname
+        fig_single.savefig(single_path, dpi=180, bbox_inches='tight')
+        plt.close(fig_single)
+        print(f"Saved: {single_path}")
