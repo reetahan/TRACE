@@ -359,6 +359,26 @@ def main(sweep_dir):
         sub = max_borough_stats[max_borough_stats['borough'] == b]
         if not sub.empty:
             print(f"    {BOROUGH_NAMES[b]}: {sub['top_p_pct'].values[0]:.1f}%")
+
+    print(f"\n  All-borough % matched gain (max_len - min_len):")
+    for b in ['M', 'X', 'K', 'Q', 'R']:
+        if b in borough_gains:
+            print(f"    {BOROUGH_NAMES[b]}: {borough_gains[b]:+.1f}pp")
+
+    print(f"\n  All-borough top-3 rate change (max_len - min_len):")
+    borough_top3_decline = {}
+    for b in ['M', 'X', 'K', 'Q', 'R']:
+        base = baseline_borough_stats[baseline_borough_stats['borough'] == b]
+        mx = max_borough_stats[max_borough_stats['borough'] == b]
+        if not base.empty and not mx.empty:
+            change = mx['top_p_pct'].values[0] - base['top_p_pct'].values[0]
+            borough_top3_decline[b] = change
+            print(f"    {BOROUGH_NAMES[b]}: {change:+.1f}pp")
+    if borough_top3_decline:
+        mildest = max(borough_top3_decline, key=borough_top3_decline.get)
+        steepest = min(borough_top3_decline, key=borough_top3_decline.get)
+        print(f"  Mildest top-3 decline:  {BOROUGH_NAMES[mildest]} ({borough_top3_decline[mildest]:+.1f}pp)")
+        print(f"  Steepest top-3 decline: {BOROUGH_NAMES[steepest]} ({borough_top3_decline[steepest]:+.1f}pp)")
     print(f"──────────────────────────────────────────────\n")
 
     print(f"  Overall avg rank at baseline (min_len={min_len_min}): {df[df['list_length_min'] == min_len_min]['avg_rank'].values[0]:.2f}")
@@ -375,6 +395,20 @@ def main(sweep_dir):
         sub = b_stats[(b_stats['list_length_min'] == min_len_max) & (b_stats['borough'] == b)]
         if not sub.empty:
             print(f"    {BOROUGH_NAMES[b]}: {sub['avg_rank'].values[0]:.2f}")
+
+    print(f"\n  All-borough avg rank change (max_len - min_len; higher = more degradation):")
+    borough_rank_change = {}
+    for b in ['M', 'X', 'K', 'Q', 'R']:
+        base = b_stats[(b_stats['list_length_min'] == min_len_min) & (b_stats['borough'] == b)]
+        mx = b_stats[(b_stats['list_length_min'] == min_len_max) & (b_stats['borough'] == b)]
+        if not base.empty and not mx.empty:
+            change = mx['avg_rank'].values[0] - base['avg_rank'].values[0]
+            borough_rank_change[b] = change
+            print(f"    {BOROUGH_NAMES[b]}: {change:+.2f}")
+    if borough_rank_change:
+        steepest_rank = max(borough_rank_change, key=borough_rank_change.get)
+        print(f"  Steepest rank degradation: {BOROUGH_NAMES[steepest_rank]} ({borough_rank_change[steepest_rank]:+.2f})")
+    print(f"──────────────────────────────────────────────\n")
 
     # Fig 7 — lottery decile
     baseline_top3 = l_stats[l_stats['list_length_min'] == min_len_min]
@@ -431,6 +465,19 @@ def main(sweep_dir):
         sub = l_stats[(l_stats['list_length_min'] == min_len_max) & (l_stats['lottery_decile'] == d)]
         if not sub.empty:
             print(f"    D{d}: {sub['avg_rank'].values[0]:.2f}")
+
+    print(f"\n  Explicit D8 / D10 call-outs:")
+    if '8' in decile_gains:
+        print(f"    D8 W_match gain (max_len - min_len): {decile_gains['8']:+.1f}pp")
+    d10_rank_base = l_stats[(l_stats['list_length_min'] == min_len_min) & (l_stats['lottery_decile'] == '10')]
+    d10_rank_max  = l_stats[(l_stats['list_length_min'] == min_len_max) & (l_stats['lottery_decile'] == '10')]
+    d10_top3_base = l_stats[(l_stats['list_length_min'] == min_len_min) & (l_stats['lottery_decile'] == '10')]
+    d10_top3_max  = l_stats[(l_stats['list_length_min'] == min_len_max) & (l_stats['lottery_decile'] == '10')]
+    if not d10_rank_base.empty and not d10_rank_max.empty:
+        print(f"    D10 avg_rank: {d10_rank_base['avg_rank'].values[0]:.2f} -> {d10_rank_max['avg_rank'].values[0]:.2f}")
+    if not d10_top3_base.empty and not d10_top3_max.empty:
+        print(f"    D10 W3:       {d10_top3_base['top_p_pct'].values[0]:.1f}% -> {d10_top3_max['top_p_pct'].values[0]:.1f}%")
+    print(f"──────────────────────────────────────────────\n")
 
 
 if __name__ == '__main__':

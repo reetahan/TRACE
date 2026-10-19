@@ -74,14 +74,15 @@ def main():
     dump.to_csv(dump_path)
     print(f"Saved: {dump_path}")
 
-    overall_match_rate = 100.0 - mean['pct_unmatched'].mean()
-    d1 = mean.loc['D1', 'top5_pct']
-    d10 = mean.loc['D10', 'top5_pct']
-    print(f"\n── Fig 5 Summary ─────────────────────────────")
-    print(f"  Top-5 rate D1:               {d1:.1f}%")
-    print(f"  Top-5 rate D10:              {d10:.1f}%")
-    print(f"  D1 vs D10 top-5 diff:        {d1-d10:+.1f}pp")
-    print(f"  Avg rank range:              {mean['avg_rank'].min():.2f} (D1) to {mean['avg_rank'].max():.2f} (D10)")
+    print(f"\n── Fig 3 Summary (luckiest D1 -> unluckiest D10) ──")
+    print(f"  W_unmatch:   {mean.loc['D1','pct_unmatched']:.1f}% -> {mean.loc['D10','pct_unmatched']:.1f}%"
+          f"  (+{mean.loc['D10','pct_unmatched']-mean.loc['D1','pct_unmatched']:.1f}pp)")
+    print(f"  W1:          {mean.loc['D1','top1_pct']:.1f}% -> {mean.loc['D10','top1_pct']:.1f}%"
+          f"  ({mean.loc['D10','top1_pct']-mean.loc['D1','top1_pct']:+.1f}pp)")
+    print(f"  W5:          {mean.loc['D1','top5_pct']:.1f}% -> {mean.loc['D10','top5_pct']:.1f}%"
+          f"  gap={mean.loc['D1','top5_pct']-mean.loc['D10','top5_pct']:.1f}pp")
+    print(f"  avg_rank:    {mean.loc['D1','avg_rank']:.2f} -> {mean.loc['D10','avg_rank']:.2f}"
+          f"  ({mean.loc['D10','avg_rank']-mean.loc['D1','avg_rank']:+.2f})")
     print(f"──────────────────────────────────────────────\n")
 
     x = np.arange(len(DECILE_LABELS))

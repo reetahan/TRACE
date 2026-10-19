@@ -24,7 +24,7 @@ def _bbox_overlaps(b1, b2, pad=2.5):
                 b1.y1 + pad < b2.y0 or b2.y1 + pad < b1.y0)
 
 
-def place_labels_no_collision(ax, fig, entries):
+def place_labels_no_collision(ax, fig, entries, font_scale=1.0):
     """
     entries: list of (x, y, text, color) in data coords.
     Places each label at the nearest offset (from _OFFSET_CANDIDATES) that doesn't
@@ -40,7 +40,7 @@ def place_labels_no_collision(ax, fig, entries):
         chosen_bbox = None
         for offset in _OFFSET_CANDIDATES:
             ann = ax.annotate(text, (x, y), textcoords='offset points', xytext=offset,
-                               fontsize=9, color=color, fontweight='bold', zorder=6)
+                               fontsize=9 * font_scale, color=color, fontweight='bold', zorder=6)
             fig.canvas.draw()
             bbox = ann.get_window_extent(renderer=renderer)
             if not any(_bbox_overlaps(bbox, pb) for pb in placed_bboxes):
@@ -105,9 +105,9 @@ def make_scatter(fig, ax, nyc_data, chile_data, obs_col, sim_col, label, panel_c
         entries.append((row[obs_col], row[sim_col], name, CHILE_COLOR))
 
     fig.canvas.draw()
-    place_labels_no_collision(ax, fig, entries)
+    place_labels_no_collision(ax, fig, entries, font_scale=font_scale)
 
-    ax.set_title(panel_caption, fontsize=12, y=-0.26)
+    ax.set_title(panel_caption, fontsize=12 * font_scale, y=-0.26)
 
 
 if __name__ == '__main__':
@@ -141,6 +141,7 @@ if __name__ == '__main__':
         panel_caption=r'(a) Top-3 match rate $W_3(\mu \mid d)$.',
         nyc_outlier_n=args.nyc_top3_outliers,
         chile_outlier_n=args.chile_top3_outliers,
+        font_scale=1.6,
     )
 
     make_scatter(
@@ -150,10 +151,11 @@ if __name__ == '__main__':
         panel_caption=r'(b) Program utilization $\bar{u}_d(\mu)$.',
         nyc_outlier_n=args.nyc_util_outliers,
         chile_outlier_n=args.chile_util_outliers,
+        font_scale=1.6,
     )
 
     handles, labels = ax_top3.get_legend_handles_labels()
-    fig.legend(handles, labels, fontsize=13, frameon=False, loc='upper center',
+    fig.legend(handles, labels, fontsize=18, frameon=False, loc='upper center',
                bbox_to_anchor=(0.5, 1.02), ncol=2, markerscale=1.2, handletextpad=0.4,
                columnspacing=1.2)
 

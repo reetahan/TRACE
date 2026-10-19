@@ -364,6 +364,29 @@ if __name__ == '__main__':
             print(f"  Mean abs district diff:      {np.mean(abs_diffs):.2f}pp")
             print(f"──────────────────────────────────────────────\n")
 
+
+            signed_by_d = dict(zip(districts_list, diffs))  # obs - sim; >0 means model underestimates
+            ranked = sorted(zip(districts_list, abs_diffs), key=lambda x: x[1])
+            print(f"── Full Ranking by |diff| on top-3, ascending ──")
+            for d, ad in ranked:
+                sd = signed_by_d[d]
+                direction = 'UNDERestimate (sim<obs)' if sd > 0 else 'OVERestimate (sim>obs)'
+                print(f"  {str(d):>25}: obs-sim={sd:+.2f}pp  ({direction})")
+
+            print(f"── Derived Outlier Check ───────────────────────")
+            n_worst = 2
+            worst_n = ranked[-n_worst:]
+            worst_names = {str(d) for d, _ in worst_n}
+            kept = [(d, ad) for d, ad in ranked if str(d) not in worst_names]
+            print(f"  Worst {n_worst} by |diff|: " +
+                  ", ".join(f"{d} (obs-sim={signed_by_d[d]:+.2f}pp)" for d, _ in worst_n))
+            if kept:
+                print(f"  Max abs diff excl. the above {n_worst}: {max(ad for _, ad in kept):.2f}pp")
+                print(f"  Mean abs diff excl. the above {n_worst}: {np.mean([ad for _, ad in kept]):.2f}pp")
+            n_best = 5 if args.mode == 'chile' else 3
+            print(f"  Best {n_best} by |diff|: " +
+                  ", ".join(f"{d} (obs-sim={signed_by_d[d]:+.2f}pp)" for d, _ in ranked[:n_best]))
+
     if args.match_stats:
         match_stats_df = pd.read_excel(args.match_stats)
         province_students = match_stats_df.set_index('Provincia')['n_students'].to_dict()
@@ -384,6 +407,24 @@ if __name__ == '__main__':
             print(f"  Min district diff (abs):     {min(abs_util_diffs):.1f}pp  ({dist_list[abs_util_diffs.index(min(abs_util_diffs))]})")
             print(f"  Mean abs district diff:      {np.mean(abs_util_diffs):.1f}pp")
             print(f"──────────────────────────────────────────────\n")
+
+        if best_block:
+            sample_vals_r = next(iter(best_block.values()))
+            n_stats_r = len(sample_vals_r['obs'])
+            idx_map_r = {k: i for i, k in enumerate([f'top{p}' for p in range(1, n_stats_r)] + ['unmatched'])}
+            if 'top3' in idx_map_r:
+                top3_idx_r = idx_map_r['top3']
+                regions_list = list(best_block.keys())
+                abs_diffs_r = [abs(best_block[r]['obs'][top3_idx_r] - best_block[r]['sim'][top3_idx_r]) for r in regions_list]
+                ranked_r = sorted(zip(regions_list, abs_diffs_r), key=lambda x: x[1])
+                print(f"── Region-level top-3 diffs (post-aggregation) ──")
+                print(f"  Number of regions after aggregation: {len(regions_list)}")
+                print(f"  Full ranking by |diff|, ascending:")
+                for r, ad in ranked_r:
+                    print(f"    {r:>30}: |diff|={ad:.2f}pp")
+                print(f"  Best-fit region:  {ranked_r[0]}")
+                print(f"  Worst-fit region: {ranked_r[-1]}")
+                print(f"──────────────────────────────────────────────\n")
 
     print_match_rate_analysis(best_block)
 
