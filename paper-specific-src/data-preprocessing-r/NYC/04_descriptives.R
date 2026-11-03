@@ -2,7 +2,6 @@
 # Aim: Create descriptives to compare the four master data sets (by borough,
 # residential district, zip code & home language)
 
-# Follow: https://docs.google.com/presentation/d/17aHrpMHus9-3tf_bncJXiavLQyBsLuVKAkil1kVQ1i4/edit?slide=id.p#slide=id.p
 
 # Packages 
 library(readxl)
