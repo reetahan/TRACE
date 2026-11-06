@@ -50,6 +50,8 @@ class TRACE:
         self._final_agg_df:    pd.DataFrame | None = None
         self._priority_config: dict | None          = None
         self._mallows_params:  dict | None          = None
+        self._raw_capacity_df: pd.DataFrame | None  = None
+        self._custom_matching_fn: Callable | None   = None
 
         self._fitted_params:           dict | None            = None
         self._preference_lists:        list[list[str]] | None = None
@@ -226,6 +228,11 @@ class TRACE:
             result = to_generic(df_em), to_generic(match_em), to_generic(school_em)
 
         elif fn == 'chile':
+            # Chile's priority-matching path needs the raw, unaggregated capacity
+            # table (rbd/program_code/regular_seats/priority_student_seats) that
+            # self._school_df holds right now, before preprocess_chilean_data()
+            # aggregates it below into the generic school_df schema.
+            self._raw_capacity_df = self._school_df.copy()
             df_em, match_em, school_em = preprocess_chilean_data(
                 self._final_agg_df, self._match_stats_df, self._school_df
             )
@@ -259,9 +266,18 @@ class TRACE:
         list_length_params: dict | None     = None,
         outfile: str | None                 = None,
         custom_matching_fn: Callable | None = None,
+        loss_top_p: list[int] | None        = None,
+        loss_include_unmatched: bool        = True,
+        init_phis: list[float] | None       = None,
+        diag_sigma: bool                    = False,
     ) -> TRACE:
         """
         Run EM to infer Mallows mixture parameters from aggregate match statistics (Mode 1).
+
+        loss_top_p / loss_include_unmatched restrict which match-stat moments drive
+        the EM loss (requires max_p to be set explicitly when loss_top_p is given).
+        init_phis overrides the random phi initialization. diag_sigma logs per-district
+        Sigma diagnostics on every phi evaluation.
         """
         if self.mode != 1:
             raise ValueError("fit() requires Mode 1 (final_aggregates_fpath + match_stats_fpath).")
@@ -294,7 +310,12 @@ class TRACE:
             save_best_sample=True,
             max_p=max_p,
             profile_timing=verbose,
-            custom_matching_fn=custom_matching_fn
+            custom_matching_fn=custom_matching_fn,
+            raw_capacity_df=self._raw_capacity_df,
+            loss_top_p=loss_top_p,
+            loss_include_unmatched=loss_include_unmatched,
+            init_phis=init_phis,
+            diag_sigma=diag_sigma,
         )
 
         self._fitted_params = experiment_results.params
@@ -834,7 +855,8 @@ class TRACE:
                     list_length_params=lp_sweep_em,
                     save_best_sample=True,
                     max_p=config.max_p,
-                    custom_matching_fn=self._custom_matching_fn
+                    custom_matching_fn=self._custom_matching_fn,
+                    raw_capacity_df=self._raw_capacity_df,
                 )
 
                 attr_df = (

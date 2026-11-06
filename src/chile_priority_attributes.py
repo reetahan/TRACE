@@ -315,7 +315,7 @@ def _assign_school_level_priority_tiers_and_dense_scores(
     student_lottery=None
 ):
     school_ids = school_table["school_id"].astype(str).tolist()
-    student_ids = sorted(applications_long["mrun"].astype(str).unique().tolist())
+    student_ids = applications_long["mrun"].astype(str).drop_duplicates().tolist()
     school_to_idx = {s: i for i, s in enumerate(school_ids)}
     student_to_idx = {s: i for i, s in enumerate(student_ids)}
 
