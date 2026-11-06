@@ -228,10 +228,6 @@ class TRACE:
             result = to_generic(df_em), to_generic(match_em), to_generic(school_em)
 
         elif fn == 'chile':
-            # Chile's priority-matching path needs the raw, unaggregated capacity
-            # table (rbd/program_code/regular_seats/priority_student_seats) that
-            # self._school_df holds right now, before preprocess_chilean_data()
-            # aggregates it below into the generic school_df schema.
             self._raw_capacity_df = self._school_df.copy()
             df_em, match_em, school_em = preprocess_chilean_data(
                 self._final_agg_df, self._match_stats_df, self._school_df
@@ -271,14 +267,8 @@ class TRACE:
         init_phis: list[float] | None       = None,
         diag_sigma: bool                    = False,
     ) -> TRACE:
-        """
-        Run EM to infer Mallows mixture parameters from aggregate match statistics (Mode 1).
-
-        loss_top_p / loss_include_unmatched restrict which match-stat moments drive
-        the EM loss (requires max_p to be set explicitly when loss_top_p is given).
-        init_phis overrides the random phi initialization. diag_sigma logs per-district
-        Sigma diagnostics on every phi evaluation.
-        """
+        # Run EM to infer Mallows mixture parameters from aggregate match statistics (Mode 1).
+        
         if self.mode != 1:
             raise ValueError("fit() requires Mode 1 (final_aggregates_fpath + match_stats_fpath).")
         if self._final_agg_df is None or self._match_stats_df is None or self._school_df is None:

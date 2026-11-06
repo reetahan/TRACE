@@ -302,20 +302,12 @@ def run_single_simulation(
 
         if raw_capacity_df is None:
             raise ValueError(
-                "system_name='Chile' requires raw_capacity_df -- the unaggregated "
-                "school capacity table with rbd/program_code/regular_seats/"
-                "priority_student_seats columns (the school_cap_df read straight "
-                "from CHILEAN_SCHOOL_CAPACITY_BY_REGION_PROVINCE_FILEPATH, before "
-                "preprocess_chilean_data() aggregates it into school_info_df). "
-                "Pass it through from EM_algorithm(raw_capacity_df=...)."
+                "Chile requires raw_capacity_df: the unaggregated school capacity table with " \
+                "rbd,program_code,regular_seats,priority_student_seats columns"
             )
 
         region_overrides = priority_config.get('region_overrides', {})
         if region_overrides:
-            # Population-weighted average across every region in the config, not just
-            # whichever one happens to be first (that single-region shortcut applied
-            # Santiago's rates to the whole country, systematically miscalibrating the
-            # ~68% of students outside Santiago).
             total_n = sum(r.get('n_students', 0) for r in region_overrides.values()) or 1
 
             def _tier_rate(region, group, default):

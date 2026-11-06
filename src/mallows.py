@@ -5,10 +5,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from util import log_and_print
 
 def _resolve_loss_indices(loss_top_p, loss_include_unmatched, max_p, n_stats):
-    """
-    Map (loss_top_p, loss_include_unmatched) to positional indices into the
-    match_stats vector used by the EM loss.
-    """
+    # Maps loss_top_p and loss_include_unmatched to positional indices into the match_stats vector used by the EM loss.
     if loss_top_p is not None:
         if max_p is None:
             raise ValueError(
@@ -30,9 +27,6 @@ def _resolve_loss_indices(loss_top_p, loss_include_unmatched, max_p, n_stats):
     return target_indices
 
 def _build_numba_prob_cache(max_positions, phi):
-    """
-    Builds a 2D array for fast C-level CDF lookups.
-    """
     cum_cache_2d = np.ones((max_positions, max_positions), dtype=np.float64)
     for i in range(max_positions):
         num_positions = i + 1
@@ -42,7 +36,7 @@ def _build_numba_prob_cache(max_positions, phi):
 
 @njit
 def _mallows_top_k_numba(central_ranking, u_draws, cum_cache_2d, k):
-    """Build only the top-k of a Mallows permutation."""
+    # Builds ONLY the top-k of a Mallows permutation
     n = len(central_ranking)
     if n == 0:
         return np.empty(0, dtype=central_ranking.dtype)
@@ -61,13 +55,11 @@ def _mallows_top_k_numba(central_ranking, u_draws, cum_cache_2d, k):
             continue
         
         if size < k:
-            # Shift right to make room
             for j in range(size, pos, -1):
                 top[j] = top[j - 1]
             top[pos] = central_ranking[i]
             size += 1
         else:
-            # Full: shift right, drop last
             for j in range(k - 1, pos, -1):
                 top[j] = top[j - 1]
             top[pos] = central_ranking[i]
