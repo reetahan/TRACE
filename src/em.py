@@ -11,7 +11,7 @@ from util import log_and_print
 from constants import *
 from data_ingestion import extract_observed_aggregates
 from gale_shapley import compute_aggregates, gale_shapley_per_school_numba_wrapper
-from mallows import  _sample_students_chunk
+from mallows import  _sample_students_chunk, _resolve_loss_indices
 from list_length import sample_truncated_normal_lengths, sample_empirical_lengths
 from nyc_priority_attributes import run_nyc_priority_matching
 from chile_priority_attributes import prepare_chile_numba_inputs_from_rankings
@@ -64,7 +64,8 @@ def run_single_simulation(
     save_best_sample=False,
     run_priority_analysis=False,
     max_p=None,
-    custom_matching_fn=None
+    custom_matching_fn=None,
+    raw_capacity_df=None,
 ):
     t_total_start = time.perf_counter()
     timings = {}
@@ -107,7 +108,7 @@ def run_single_simulation(
         mallows_k = min(list_length_max, max_schools_in_any_district) if list_length_max is not None  \
             else min(max_schools_in_any_district, int(list_length_mean + max_stds_above * list_length_std) + 1)
     elif list_length_mode == 'empirical':
-        mallows_k = len(list_length_empirical_probs)
+        mallows_k = max(list_length_empirical_probs.keys())
 
     # Collect all chunks across all districts
     t_chunks_start = time.perf_counter()
@@ -298,25 +299,43 @@ def run_single_simulation(
         ], dtype=np.int32)
 
     elif system_name == 'Chile':
-        
+
+        if raw_capacity_df is None:
+            raise ValueError(
+                "Chile requires raw_capacity_df: the unaggregated school capacity table with " \
+                "rbd,program_code,regular_seats,priority_student_seats columns"
+            )
+
         region_overrides = priority_config.get('region_overrides', {})
         if region_overrides:
-            first_region = next(iter(region_overrides.values()))
-            fracs = first_region.get('student_attribute_fractions', {})
-            tiers = first_region.get('priority_tiers', [])
+            total_n = sum(r.get('n_students', 0) for r in region_overrides.values()) or 1
+
+            def _tier_rate(region, group, default):
+                return next(
+                    (t['fraction_eligible'] for t in region.get('priority_tiers', []) if t['group'] == group),
+                    default,
+                )
+
+            def _weighted(extractor):
+                return sum(
+                    r.get('n_students', 0) * extractor(r) for r in region_overrides.values()
+                ) / total_n
+
             calibration = {
-                'priority_student_student_rate': fracs.get('disadvantaged', 0.6889),
-                'priority_sibling_student_rate': next((t['fraction_eligible'] for t in tiers if t['group'] == 'sibling'), 0.1539),
-                'priority_parent_civil_servant_student_rate': next((t['fraction_eligible'] for t in tiers if t['group'] == 'working_parent'), 0.0066),
-                'priority_ex_student_student_rate': next((t['fraction_eligible'] for t in tiers if t['group'] == 'returning_student'), 0.0521),
-                'priority_already_registered_student_rate': fracs.get('already_registered', 0.1398),
+                'priority_student_student_rate': _weighted(
+                    lambda r: r.get('student_attribute_fractions', {}).get('disadvantaged', 0.6889)),
+                'priority_sibling_student_rate': _weighted(lambda r: _tier_rate(r, 'sibling', 0.1539)),
+                'priority_parent_civil_servant_student_rate': _weighted(lambda r: _tier_rate(r, 'working_parent', 0.0066)),
+                'priority_ex_student_student_rate': _weighted(lambda r: _tier_rate(r, 'returning_student', 0.0521)),
+                'priority_already_registered_student_rate': _weighted(
+                    lambda r: r.get('student_attribute_fractions', {}).get('already_registered', 0.1398)),
             }
         else:
             calibration = None
 
         prepared = prepare_chile_numba_inputs_from_rankings(
             truncated_rankings=all_rankings,
-            capacity_rows=school_info_df,
+            capacity_rows=raw_capacity_df,
             seed=int(rng.integers(2**32)),
             calibration=calibration,
         )
@@ -408,7 +427,9 @@ def EM_algorithm(df, match_stats_df, school_info_df,
                  max_iter=10, tol=0.01, K=1, M_simulations=20, seed=40, eta=LEARNING_RATE, outfile=None, 
                  sampling_n_jobs=32, max_iter_opt=5, per_school_lottery=False, 
                  profile_timing=True, priority_config=None, district_to_region=None, 
-                 list_length_params=None, save_best_sample=False, max_p=None, custom_matching_fn=None):
+                 list_length_params=None, save_best_sample=False, max_p=None, custom_matching_fn=None,
+                 raw_capacity_df=None, loss_top_p=None, loss_include_unmatched=True,
+                 init_phis=None, diag_sigma=False):
 
 
     cur_experiment_result = ExperimentResult()
@@ -427,10 +448,24 @@ def EM_algorithm(df, match_stats_df, school_info_df,
         log_and_print("  Timing instrumentation: ENABLED", log_file=outfile)
     
     rng_init = np.random.default_rng(seed)
-    params = initialize_parameters_global_mixture(districts, df, K, rng=rng_init)
+    params = initialize_parameters_global_mixture(districts, df, K, rng=rng_init, init_phis=init_phis)
+    if init_phis is not None:
+        log_and_print(f"  Global phis initialized from --init_phis override: {params['global_phis']}", log_file=outfile)
 
     observed_agg = extract_observed_aggregates(df, match_stats_df, max_p=max_p)
-    
+
+    n_stats = len(next(iter(observed_agg.values()))['match_stats'])
+    loss_indices = _resolve_loss_indices(loss_top_p, loss_include_unmatched, max_p, n_stats)
+    if n_stats == 4 and max_p is None:
+        all_metric_names = ["top3", "top5", "top10", "unmatched"]
+    else:
+        all_metric_names = [f"top{p}" for p in range(1, n_stats)] + ["unmatched"]
+    log_and_print(
+        f"  Loss metrics used: {[all_metric_names[i] for i in loss_indices]} "
+        f"(loss_top_p={loss_top_p}, loss_include_unmatched={loss_include_unmatched})",
+        log_file=outfile,
+    )
+
     log_likelihoods = []
     best_params = None
     best_log_like = -np.inf
@@ -452,8 +487,11 @@ def EM_algorithm(df, match_stats_df, school_info_df,
             iteration=iteration, outfile=outfile, sampling_n_jobs=sampling_n_jobs,
             executor=executor, max_iter_em=max_iter, max_iter_opt=max_iter_opt,
             per_school_lottery=per_school_lottery, priority_config=priority_config,
-            district_to_region=district_to_region, list_length_params=list_length_params, 
-            save_best_sample=save_best_sample, best_phis_seen=best_phis_seen, max_p=max_p
+            district_to_region=district_to_region, list_length_params=list_length_params,
+            save_best_sample=save_best_sample, best_phis_seen=best_phis_seen, max_p=max_p,
+            custom_matching_fn=custom_matching_fn, raw_capacity_df=raw_capacity_df,
+            loss_top_p=loss_top_p, loss_include_unmatched=loss_include_unmatched,
+            diag_sigma=diag_sigma,
         )
 
         log_and_print(f"Checking results of optimizing global mixture...", log_file=outfile)
@@ -525,7 +563,7 @@ def EM_algorithm(df, match_stats_df, school_info_df,
 
     return cur_experiment_result
 
-def initialize_parameters_global_mixture(districts, df, K=1, rng=None):
+def initialize_parameters_global_mixture(districts, df, K=1, rng=None, init_phis=None):
     """
     Initialize with global phis, district-specific sigmas
     """
@@ -533,9 +571,14 @@ def initialize_parameters_global_mixture(districts, df, K=1, rng=None):
         rng = np.random.default_rng()
 
     # Global mixture parameters (shared across districts)
-    global_phis = rng.beta(6, 1, K)
-    global_phis = np.clip(global_phis, 0.5, 0.99)
-    
+    if init_phis is not None:
+        global_phis = np.asarray(init_phis, dtype=float).copy()
+        if len(global_phis) != K:
+            raise ValueError(f"init_phis has length {len(global_phis)}, expected K={K}")
+    else:
+        global_phis = rng.beta(6, 1, K)
+        global_phis = np.clip(global_phis, 0.5, 0.99)
+
     global_weights = np.ones(K) / K  # Uniform initially
     
     params = {
@@ -566,8 +609,11 @@ def compute_log_likelihood_gaussian_all_districts(params_global, observed_agg,
                                                    M=1, seed=42, outfile=None, 
                                                    executor=None, sampling_n_jobs=32, per_school_lottery=False, 
                                                    priority_config=None, district_to_region=None, 
-                                                   list_length_params=None, save_best_sample=False, 
-                                                   profile_timing=True, lottery_fixed=None, max_p=None):
+                                                   list_length_params=None, save_best_sample=False,
+                                                   profile_timing=True, lottery_fixed=None, max_p=None,
+                                                   custom_matching_fn=None, raw_capacity_df=None,
+                                                   loss_top_p=None, loss_include_unmatched=True,
+                                                   diag_sigma=False):
 
 
     t_total_start = time.perf_counter()
@@ -592,9 +638,10 @@ def compute_log_likelihood_gaussian_all_districts(params_global, observed_agg,
             params_global, df, match_stats_df, school_info_df, mallows_seed=seed + sim,
             lottery_fixed=lottery_fixed, outfile=outfile, executor=executor,
             sampling_n_jobs=sampling_n_jobs, per_school_lottery=per_school_lottery,
-            priority_config=priority_config, district_to_region=district_to_region, 
+            priority_config=priority_config, district_to_region=district_to_region,
             list_length_params=list_length_params, save_best_sample=save_best_sample,
-            run_priority_analysis = (sim == M-1), max_p=max_p
+            run_priority_analysis = (sim == M-1), max_p=max_p,
+            custom_matching_fn=custom_matching_fn, raw_capacity_df=raw_capacity_df,
         )
         if save_best_sample:
             agg, synth_info = res
@@ -650,10 +697,12 @@ def compute_log_likelihood_gaussian_all_districts(params_global, observed_agg,
     
     #metric_names = ["top3", "top5", "top10", "unmatched"]
     n_stats = len(next(iter(observed_agg.values()))['match_stats'])
-    if n_stats == 4:
+    if n_stats == 4 and max_p is None:
         metric_names = ["top3", "top5", "top10", "unmatched"]
     else:
         metric_names = [f"top{p}" for p in range(1, n_stats)] + ["unmatched"]
+
+    loss_target_indices = _resolve_loss_indices(loss_top_p, loss_include_unmatched, max_p, n_stats)
 
     for d_idx, district in enumerate(districts):
         obs = np.array(observed_agg[district]['match_stats'], dtype=float)
@@ -721,16 +770,20 @@ def compute_log_likelihood_gaussian_all_districts(params_global, observed_agg,
     total_log_lik = 0
     
     for district in districts:
-        X = np.array(simulated_samples[district])  # M × 4 array
-        
+        X = np.array(simulated_samples[district])  # M × num_match_stats array
+
         # Check for valid data
         if len(X) == 0 or np.any(np.isnan(X)) or np.any(np.isinf(X)):
             log_and_print(f"      Warning: Invalid data for district {district}", log_file=outfile)
             continue
-        
+
+        # Get observed vector, restricted to whichever moments the loss is configured to use
+        obs_vec = np.asarray(observed_agg[district]['match_stats'])[loss_target_indices]
+        X = X[:, loss_target_indices]
+
         # Estimate mean and covariance
         mu = np.mean(X, axis=0)
-        
+
         if M > 1:
             Sigma = np.cov(X, rowvar=False)
             
@@ -750,12 +803,9 @@ def compute_log_likelihood_gaussian_all_districts(params_global, observed_agg,
             except np.linalg.LinAlgError:
                 Sigma = Sigma + 1e-2 * np.eye(len(Sigma))
         else:
-            # Not enough samples for covariance
-            Sigma = 1e-2 * np.eye(4)
-        
-        # Get observed vector
-        obs_vec = observed_agg[district]['match_stats']
-        
+            log_and_print(f"  Warning: Not enough samples for covariance in district {district}", log_file=outfile)
+            Sigma = 1e-2 * np.eye(X.shape[1])
+
         # Compute Mahalanobis distance
         try:
             diff = obs_vec - mu
@@ -768,7 +818,16 @@ def compute_log_likelihood_gaussian_all_districts(params_global, observed_agg,
                 log_lik = -1e10
             else:
                 log_lik = -0.5 * mahalanobis_sq - 0.5 * log_det
-            
+
+            if diag_sigma:
+                log_and_print(
+                    f"      [DIAG] district={district} loss_dims={len(loss_target_indices)} "
+                    f"diag(Sigma)={np.round(np.diag(Sigma), 4).tolist()} "
+                    f"diff={np.round(diff, 2).tolist()} "
+                    f"mahalanobis_sq={mahalanobis_sq:.2f} log_det={log_det:.4f} log_lik={log_lik:.2f}",
+                    log_file=outfile,
+                )
+
             # Sanity check
             if np.isnan(log_lik) or np.isinf(log_lik):
                 log_and_print(f"Warning: Invalid log-likelihood for district {district}", log_file=outfile)
@@ -799,8 +858,10 @@ def optimize_global_mixture(params, observed_agg, df, match_stats_df,
                             sampling_n_jobs=32, outfile=None, executor=None, 
                             max_iter_em=5, max_iter_opt=5, per_school_lottery=False, 
                             profile_timing=True, priority_config=None, 
-                            district_to_region=None, list_length_params=None, 
-                            save_best_sample=False, best_phis_seen=None, max_p=None):
+                            district_to_region=None, list_length_params=None,
+                            save_best_sample=False, best_phis_seen=None, max_p=None,
+                            custom_matching_fn=None, raw_capacity_df=None,
+                            loss_top_p=None, loss_include_unmatched=True, diag_sigma=False):
 
     t_opt_start = time.perf_counter()
     K = len(params['global_phis'])
@@ -832,8 +893,10 @@ def optimize_global_mixture(params, observed_agg, df, match_stats_df,
                 params, observed_agg, df, match_stats_df, 
                 school_info_df, M=M, seed=seed,  outfile=outfile, 
                 executor=executor, sampling_n_jobs=sampling_n_jobs, per_school_lottery=per_school_lottery, 
-                profile_timing=profile_timing, priority_config=priority_config, district_to_region=district_to_region, 
-                list_length_params=list_length_params, save_best_sample=save_best_sample, lottery_fixed=lottery_fixed, max_p=max_p
+                profile_timing=profile_timing, priority_config=priority_config, district_to_region=district_to_region,
+                list_length_params=list_length_params, save_best_sample=save_best_sample, lottery_fixed=lottery_fixed, max_p=max_p,
+                custom_matching_fn=custom_matching_fn, raw_capacity_df=raw_capacity_df,
+                loss_top_p=loss_top_p, loss_include_unmatched=loss_include_unmatched, diag_sigma=diag_sigma,
             )
             if total_log_lik > best_log_like_seen:
                 best_log_like_seen = total_log_lik

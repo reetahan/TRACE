@@ -11,7 +11,6 @@ DISTRICT_TO_BOROUGH_MAPPING = {
 UTILITY_PENALTY = -0.1
 LEARNING_RATE = 0.1
 
-# pct_top_{k} columns are handled separately in _to_em_dataframes().
 EM_COLUMN_MAP: dict[str, str] = {
     'subdivision':       'Residential District',
     'school_id':         'School DBN',
@@ -45,6 +44,10 @@ CHILE_PROVINCE_TO_REGION_MAPPING = {
     'Magallanes': 'Región de Magallanes y Antártica Chilena', 'Tierra del Fuego': 'Región de Magallanes y Antártica Chilena', 
     'Antártica Chilena': 'Región de Magallanes y Antártica Chilena', 'Santiago': 'Región Metropolitana de Santiago', 
     'Cordillera': 'Región Metropolitana de Santiago', 'Chacabuco': 'Región Metropolitana de Santiago', 'Maipo': 'Región Metropolitana de Santiago', 
-    'Talagante': 'Región Metropolitana de Santiago', 'Melipilla': 'Región Metropolitana de Santiago', 
-    'Isla de Pascua': 'Región de Valparaíso'
+    'Talagante': 'Región Metropolitana de Santiago', 'Melipilla': 'Región Metropolitana de Santiago',
+    'Isla de Pascua': 'Región de Valparaíso',
+    'Santiago_Centro': 'Región Metropolitana de Santiago', 'Santiago_Nor_Oriente': 'Región Metropolitana de Santiago',
+    'Santiago_Nor_Poniente': 'Región Metropolitana de Santiago', 'Santiago_Oriente': 'Región Metropolitana de Santiago',
+    'Santiago_Poniente': 'Región Metropolitana de Santiago', 'Santiago_Sur': 'Región Metropolitana de Santiago',
+    'Santiago_Sur_Oriente': 'Región Metropolitana de Santiago', 'Santiago_Sur_Poniente': 'Región Metropolitana de Santiago',
 }

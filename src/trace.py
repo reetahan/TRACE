@@ -50,6 +50,8 @@ class TRACE:
         self._final_agg_df:    pd.DataFrame | None = None
         self._priority_config: dict | None          = None
         self._mallows_params:  dict | None          = None
+        self._raw_capacity_df: pd.DataFrame | None  = None
+        self._custom_matching_fn: Callable | None   = None
 
         self._fitted_params:           dict | None            = None
         self._preference_lists:        list[list[str]] | None = None
@@ -226,6 +228,7 @@ class TRACE:
             result = to_generic(df_em), to_generic(match_em), to_generic(school_em)
 
         elif fn == 'chile':
+            self._raw_capacity_df = self._school_df.copy()
             df_em, match_em, school_em = preprocess_chilean_data(
                 self._final_agg_df, self._match_stats_df, self._school_df
             )
@@ -259,10 +262,13 @@ class TRACE:
         list_length_params: dict | None     = None,
         outfile: str | None                 = None,
         custom_matching_fn: Callable | None = None,
+        loss_top_p: list[int] | None        = None,
+        loss_include_unmatched: bool        = True,
+        init_phis: list[float] | None       = None,
+        diag_sigma: bool                    = False,
     ) -> TRACE:
-        """
-        Run EM to infer Mallows mixture parameters from aggregate match statistics (Mode 1).
-        """
+        # Run EM to infer Mallows mixture parameters from aggregate match statistics (Mode 1).
+        
         if self.mode != 1:
             raise ValueError("fit() requires Mode 1 (final_aggregates_fpath + match_stats_fpath).")
         if self._final_agg_df is None or self._match_stats_df is None or self._school_df is None:
@@ -294,7 +300,12 @@ class TRACE:
             save_best_sample=True,
             max_p=max_p,
             profile_timing=verbose,
-            custom_matching_fn=custom_matching_fn
+            custom_matching_fn=custom_matching_fn,
+            raw_capacity_df=self._raw_capacity_df,
+            loss_top_p=loss_top_p,
+            loss_include_unmatched=loss_include_unmatched,
+            init_phis=init_phis,
+            diag_sigma=diag_sigma,
         )
 
         self._fitted_params = experiment_results.params
@@ -834,7 +845,8 @@ class TRACE:
                     list_length_params=lp_sweep_em,
                     save_best_sample=True,
                     max_p=config.max_p,
-                    custom_matching_fn=self._custom_matching_fn
+                    custom_matching_fn=self._custom_matching_fn,
+                    raw_capacity_df=self._raw_capacity_df,
                 )
 
                 attr_df = (
