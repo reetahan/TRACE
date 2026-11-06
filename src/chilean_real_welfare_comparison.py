@@ -137,7 +137,11 @@ def aggregate_runs(curve_list: List[pd.Series]) -> pd.DataFrame:
     """mean/std/ci95 (normal-approx 95% CI) across independent lottery-draw runs."""
     df = pd.concat(curve_list, axis=1)
     n = df.shape[1]
-    std = df.std(axis=1)
+    # ddof=0: pandas' default ddof=1 returns NaN for a single run (n-1=0 degrees of
+    # freedom), which then NaNs out ci95 and breaks downstream plot y-limits. ddof=0
+    # matches aggregate_scalar_runs' numpy .std() (also ddof=0 by default) and gives
+    # the correct std=0 for n=1, not NaN.
+    std = df.std(axis=1, ddof=0)
     return pd.DataFrame({'mean': df.mean(axis=1), 'std': std, 'ci95': 1.96 * std / np.sqrt(n)})
 
 
@@ -147,6 +151,18 @@ def aggregate_scalar_runs(values: List[float]) -> Dict[str, float]:
     n = len(arr)
     std = float(arr.std())
     return {'mean': float(arr.mean()), 'std': std, 'ci95': 1.96 * std / np.sqrt(n)}
+
+
+def select_best_run(curve_list: List[pd.Series], best_i: int) -> pd.DataFrame:
+    """Same return shape as aggregate_runs, but mean=curve_list[best_i] and std/ci95=0 --
+    a single selected replicate, not an average."""
+    mean = curve_list[best_i]
+    zeros = pd.Series(0.0, index=mean.index)
+    return pd.DataFrame({'mean': mean, 'std': zeros, 'ci95': zeros})
+
+
+def select_best_scalar_run(values: List[float], best_i: int) -> Dict[str, float]:
+    return {'mean': float(values[best_i]), 'std': 0.0, 'ci95': 0.0}
 
 COLORS = {
     'all':       '#2c3e50',
@@ -253,6 +269,7 @@ def make_diff_bar_plot(
 
     fig, ax = plt.subplots(figsize=(9, 4.5))
     colors = [STB_COLOR if d >= 0 else MTB_COLOR for d in diffs]
+    colors[-1] = MTB_COLOR  # W_unmatch always orange, regardless of sign
     ax.bar(x, diffs, color=colors, width=0.65, yerr=diff_ci95, capsize=5,
            error_kw={'ecolor': '#000000', 'elinewidth': 2})
     ax.axhline(0, color='black', linewidth=0.8)
@@ -265,8 +282,9 @@ def make_diff_bar_plot(
     tick_labels = [f'$W_{{{p}}}$' for p in ps] + ['$W_{\\mathrm{unmatch}}$']
     ax.set_xticks(x)
     ax.set_xticklabels(tick_labels)
-    ax.set_xlabel('Matched Rank', fontsize=12)
-    ax.set_ylabel('STB - MTB (pp)', fontsize=12)
+    ax.set_xlabel('Matched Rank', fontsize=15)
+    ax.set_ylabel('STB - MTB (pp)', fontsize=15)
+    ax.tick_params(labelsize=12)
 
     bar_tops = [d + e for d, e in zip(diffs, diff_ci95)] + [0]
     bar_bottoms = [d - e for d, e in zip(diffs, diff_ci95)] + [0]
@@ -275,9 +293,9 @@ def make_diff_bar_plot(
     ax.set_ylim(y_min - pad, y_max + pad)
 
     ax.text(0.02, 0.97, '← STB better', transform=ax.transAxes,
-            ha='left', va='top', color=STB_COLOR, fontsize=11, fontweight='bold')
+            ha='left', va='top', color=STB_COLOR, fontsize=13, fontweight='bold')
     ax.text(0.98, 0.03, 'MTB better →', transform=ax.transAxes,
-            ha='right', va='bottom', color=MTB_COLOR, fontsize=11, fontweight='bold')
+            ha='right', va='bottom', color=MTB_COLOR, fontsize=13, fontweight='bold')
 
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -306,6 +324,12 @@ def main():
     parser.add_argument('--n_stb_runs',   type=int, default=10,
                          help='Independent replicates averaged for BOTH MTB and STB.')
     parser.add_argument('--max_p',        type=int, default=10)
+    parser.add_argument('--select_best_of_n', action='store_true',
+                         help='Instead of averaging the n_stb_runs replicates, draw all of them and keep '
+                              "only the single replicate whose overall unmatched rate is closest to the "
+                              "real observed unmatched rate (from --real_individual's matched_first_round "
+                              'column). No CI -- matches the "best of many, scored against real data" '
+                              'regime as the real-profile Fig 2/16 figures. Requires --params_pkl.')
     parser.add_argument('--seed',         type=int, default=DATA_GENERATION_SEED)
     args = parser.parse_args()
 
@@ -313,6 +337,8 @@ def main():
         parser.error('Pass exactly one of --individual or --params_pkl.')
     if args.params_pkl and not args.real_individual:
         parser.error('--params_pkl requires --real_individual (for calibration).')
+    if args.select_best_of_n and not args.params_pkl:
+        parser.error('--select_best_of_n requires --params_pkl (needs independent preference draws to select among).')
 
     print("Loading data...")
     capacity_df = load_df(args.capacity)
@@ -343,8 +369,15 @@ def main():
 
     rng = np.random.default_rng(args.seed)
 
+    real_observed_unmatched = None
+    if args.select_best_of_n:
+        real_matched = real_indv_df_for_calibration.groupby('mrun')['matched_first_round'].max()
+        real_observed_unmatched = 100.0 * (1.0 - real_matched.mean())
+        print(f"  Real observed unmatched rate (selection target): {real_observed_unmatched:.2f}%")
+
     print(f"\nRunning {args.n_stb_runs} MTB replicates (real priority, per-school lottery)...")
     mtb_curves: Dict = {g: {'uncond': [], 'cond': [], 'unmatched': []} for g in ['all', 'female', 'nonfemale']}
+    mtb_scores = []
     for run in range(args.n_stb_runs):
         print(f"  MTB run {run+1}/{args.n_stb_runs}...")
         indv_df = get_indv_df_for_replicate(rng)
@@ -357,7 +390,11 @@ def main():
         student_ids_mtb, rankings_mtb, matches_mtb = run_matching(
             applications_long, school_table, rng, student_lottery=None
         )
+        replicate_unmatched = (matches_mtb < 0).mean() * 100
         print(f"    Match rate: {(matches_mtb >= 0).mean() * 100:.1f}%")
+        if real_observed_unmatched is not None:
+            mtb_scores.append(abs(replicate_unmatched - real_observed_unmatched))
+            print(f"    |unmatched diff from real|={mtb_scores[-1]:.2f}pp")
         run_curves = compute_top_p_curves(
             student_ids_mtb, rankings_mtb, matches_mtb, student_attrs, args.max_p
         )
@@ -366,18 +403,31 @@ def main():
             mtb_curves[g]['cond'].append(run_curves[g]['cond'])
             mtb_curves[g]['unmatched'].append(run_curves[g]['unmatched'])
 
-    mtb_results = {
-        g: {
-            'uncond': aggregate_runs(mtb_curves[g]['uncond']),
-            'cond':   aggregate_runs(mtb_curves[g]['cond']),
-            'unmatched': aggregate_scalar_runs(mtb_curves[g]['unmatched']),
+    if real_observed_unmatched is not None:
+        mtb_best_i = int(np.argmin(mtb_scores))
+        print(f"  MTB: keeping run {mtb_best_i + 1} (closest to real, |diff|={mtb_scores[mtb_best_i]:.2f}pp)")
+        mtb_results = {
+            g: {
+                'uncond': select_best_run(mtb_curves[g]['uncond'], mtb_best_i),
+                'cond':   select_best_run(mtb_curves[g]['cond'], mtb_best_i),
+                'unmatched': select_best_scalar_run(mtb_curves[g]['unmatched'], mtb_best_i),
+            }
+            for g in ['all', 'female', 'nonfemale']
         }
-        for g in ['all', 'female', 'nonfemale']
-    }
+    else:
+        mtb_results = {
+            g: {
+                'uncond': aggregate_runs(mtb_curves[g]['uncond']),
+                'cond':   aggregate_runs(mtb_curves[g]['cond']),
+                'unmatched': aggregate_scalar_runs(mtb_curves[g]['unmatched']),
+            }
+            for g in ['all', 'female', 'nonfemale']
+        }
 
     # STB — n_stb_runs replicates with single per-student lottery
     print(f"\nRunning {args.n_stb_runs} STB replicates...")
     stb_curves: Dict = {g: {'uncond': [], 'cond': [], 'unmatched': []} for g in ['all', 'female', 'nonfemale']}
+    stb_scores = []
 
     for run in range(args.n_stb_runs):
         print(f"  STB run {run+1}/{args.n_stb_runs}...")
@@ -389,7 +439,11 @@ def main():
         student_ids_stb, rankings_stb, matches_stb = run_matching(
             applications_long, school_table, rng, student_lottery=student_lottery
         )
+        replicate_unmatched = (matches_stb < 0).mean() * 100
         print(f"    Match rate: {(matches_stb >= 0).mean() * 100:.1f}%")
+        if real_observed_unmatched is not None:
+            stb_scores.append(abs(replicate_unmatched - real_observed_unmatched))
+            print(f"    |unmatched diff from real|={stb_scores[-1]:.2f}pp")
         run_curves = compute_top_p_curves(
             student_ids_stb, rankings_stb, matches_stb, student_attrs, args.max_p
         )
@@ -398,40 +452,54 @@ def main():
             stb_curves[g]['cond'].append(run_curves[g]['cond'])
             stb_curves[g]['unmatched'].append(run_curves[g]['unmatched'])
 
-    stb_results = {
-        g: {
-            'uncond': aggregate_runs(stb_curves[g]['uncond']),
-            'cond':   aggregate_runs(stb_curves[g]['cond']),
-            'unmatched': aggregate_scalar_runs(stb_curves[g]['unmatched']),
+    if real_observed_unmatched is not None:
+        stb_best_i = int(np.argmin(stb_scores))
+        print(f"  STB: keeping run {stb_best_i + 1} (closest to real, |diff|={stb_scores[stb_best_i]:.2f}pp)")
+        stb_results = {
+            g: {
+                'uncond': select_best_run(stb_curves[g]['uncond'], stb_best_i),
+                'cond':   select_best_run(stb_curves[g]['cond'], stb_best_i),
+                'unmatched': select_best_scalar_run(stb_curves[g]['unmatched'], stb_best_i),
+            }
+            for g in ['all', 'female', 'nonfemale']
         }
-        for g in ['all', 'female', 'nonfemale']
-    }
+    else:
+        stb_results = {
+            g: {
+                'uncond': aggregate_runs(stb_curves[g]['uncond']),
+                'cond':   aggregate_runs(stb_curves[g]['cond']),
+                'unmatched': aggregate_scalar_runs(stb_curves[g]['unmatched']),
+            }
+            for g in ['all', 'female', 'nonfemale']
+        }
 
     print("\nGenerating plots...")
     make_plot(mtb_results, stb_results, 'uncond', args.max_p, args.output_uncond, args.n_stb_runs)
     make_plot(mtb_results, stb_results, 'cond',   args.max_p, args.output_cond,   args.n_stb_runs)
     make_diff_bar_plot(mtb_results, stb_results, 'uncond', args.max_p, args.output_diff_bar)
 
-    print("\nMTB vs STB summary (all students, unconditional):")
-    print(f"{'p':>4}  {'MTB, Overall%':>6}  {'STB, Overall%':>6}  {'Overall Diff':>7} {'MTB, Female%':>6}  {'STB, Female%':>6}  {'Female Diff':>7} {'MTB, Non-female%':>6}  {'STB, Non-female%':>6}  {'Non-female Diff':>7}")
+    # Table 9 layout: Overall / Female / Non-female column groups, each with
+    # MTB / STB / Diff (STB-MTB, pp) sub-columns, rows p=1..max_p then Unmatched.
+    print("\n=== Table 9: Chile top-p match rates (%) under MTB and STB ===")
+    col = f"{'':>4}  {'Overall':^20}  {'Female':^20}  {'Non-female':^20}"
+    sub = f"{'p':>4}  {'MTB':>6} {'STB':>6} {'Diff':>7}  {'MTB':>6} {'STB':>6} {'Diff':>7}  {'MTB':>6} {'STB':>6} {'Diff':>7}"
+    print(col)
+    print(sub)
     for p in range(1, args.max_p + 1):
-        mtb_v = mtb_results['all']['uncond']['mean'][p]
-        stb_v = stb_results['all']['uncond']['mean'][p]
-        mtb_v_f = mtb_results['female']['uncond']['mean'][p]
-        stb_v_f = stb_results['female']['uncond']['mean'][p]
-        mtb_v_nf = mtb_results['nonfemale']['uncond']['mean'][p]
-        stb_v_nf = stb_results['nonfemale']['uncond']['mean'][p]
-        print(f"{p:>4}  {mtb_v:>6.1f}  {stb_v:>6.1f}  {stb_v - mtb_v:>+7.1f}pp {mtb_v_f:>6.1f}  {stb_v_f:>6.1f} {stb_v_f - mtb_v_f:>+7.1f}pp {mtb_v_nf:>6.1f}  {stb_v_nf:>6.1f}  {stb_v_nf - mtb_v_nf:>+7.1f}pp")
+        mtb_v, stb_v = mtb_results['all']['uncond']['mean'][p], stb_results['all']['uncond']['mean'][p]
+        mtb_f, stb_f = mtb_results['female']['uncond']['mean'][p], stb_results['female']['uncond']['mean'][p]
+        mtb_nf, stb_nf = mtb_results['nonfemale']['uncond']['mean'][p], stb_results['nonfemale']['uncond']['mean'][p]
+        print(f"{p:>4}  {mtb_v:>6.1f} {stb_v:>6.1f} {stb_v - mtb_v:>+6.1f}pp  "
+              f"{mtb_f:>6.1f} {stb_f:>6.1f} {stb_f - mtb_f:>+6.1f}pp  "
+              f"{mtb_nf:>6.1f} {stb_nf:>6.1f} {stb_nf - mtb_nf:>+6.1f}pp")
 
-    print(f"\nUnmatched rates:")
-    print(f"{'':>4}  {'MTB Overall':>12}  {'STB Overall':>12}  {'MTB Female':>12}  {'STB Female':>12}  {'MTB Non-f':>12}  {'STB Non-f':>12}")
-    mtb_un    = mtb_results['all']['unmatched']['mean']
-    stb_un    = stb_results['all']['unmatched']['mean']
-    mtb_un_f  = mtb_results['female']['unmatched']['mean']
-    stb_un_f  = stb_results['female']['unmatched']['mean']
-    mtb_un_nf = mtb_results['nonfemale']['unmatched']['mean']
-    stb_un_nf = stb_results['nonfemale']['unmatched']['mean']
-    print(f"{'':>4}  {mtb_un:>12.1f}  {stb_un:>12.1f}  {mtb_un_f:>12.1f}  {stb_un_f:>12.1f}  {mtb_un_nf:>12.1f}  {stb_un_nf:>12.1f}")
+    mtb_un, stb_un = mtb_results['all']['unmatched']['mean'], stb_results['all']['unmatched']['mean']
+    mtb_un_f, stb_un_f = mtb_results['female']['unmatched']['mean'], stb_results['female']['unmatched']['mean']
+    mtb_un_nf, stb_un_nf = mtb_results['nonfemale']['unmatched']['mean'], stb_results['nonfemale']['unmatched']['mean']
+    print(f"{'Unm.':>4}  {mtb_un:>6.1f} {stb_un:>6.1f} {stb_un - mtb_un:>+6.1f}pp  "
+          f"{mtb_un_f:>6.1f} {stb_un_f:>6.1f} {stb_un_f - mtb_un_f:>+6.1f}pp  "
+          f"{mtb_un_nf:>6.1f} {stb_un_nf:>6.1f} {stb_un_nf - mtb_un_nf:>+6.1f}pp")
+    print("(Diff = STB - MTB, pp)")
 
 if __name__ == '__main__':
     main()

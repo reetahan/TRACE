@@ -120,6 +120,15 @@ def main():
     parser.add_argument('--capacity', required=True)
     parser.add_argument('--n_stb_runs', type=int, default=10,
                          help='Independent replicates for both MTB and STB.')
+    parser.add_argument('--select_best_of_n', action='store_true',
+                         help='Instead of averaging the n_stb_runs replicates, draw all of them and '
+                              'keep only the single replicate whose overall unmatched rate is closest '
+                              'to the real observed unmatched rate (from --real_individual\'s '
+                              "matched_first_round column). No CI -- a single selected point, matching "
+                              'the same "best of many, scored against real data" regime as the real-profile '
+                              'Fig 2/16 figures (sourced from the EM training log\'s best-iteration snapshot). '
+                              'Requires --params_pkl (selection needs independent preference draws to choose '
+                              'among; --individual reuses the same fixed preferences every replicate).')
     parser.add_argument('--output', default='fig8_chile_region_cumulative.png')
     parser.add_argument('--seed', type=int, default=DATA_GENERATION_SEED)
     args = parser.parse_args()
@@ -128,6 +137,8 @@ def main():
         parser.error('Pass exactly one of --individual or --params_pkl.')
     if args.params_pkl and not args.real_individual:
         parser.error('--params_pkl requires --real_individual (for calibration).')
+    if args.select_best_of_n and not args.params_pkl:
+        parser.error('--select_best_of_n requires --params_pkl (needs independent preference draws to select among).')
 
     print("Loading data...")
     capacity_df = load_df(args.capacity)
@@ -157,35 +168,52 @@ def main():
 
     rng = np.random.default_rng(args.seed)
 
+    real_observed_unmatched = None
+    if args.select_best_of_n:
+        real_matched = real_indv_df_for_calibration.groupby('mrun')['matched_first_round'].max()
+        real_observed_unmatched = 100.0 * (1.0 - real_matched.mean())
+        print(f"  Real observed unmatched rate (selection target): {real_observed_unmatched:.2f}%")
+
+    def run_condition(label, student_lottery_fn):
+        """student_lottery_fn(applications_long) -> student_lottery dict or None (MTB)."""
+        runs, scores = [], []
+        for run in range(args.n_stb_runs):
+            print(f"  {label} run {run + 1}/{args.n_stb_runs}...")
+            indv_df = get_indv_df_for_replicate(rng)
+            applications_long = build_applications_long(indv_df)
+            student_region = build_student_region(indv_df)
+            student_lottery = student_lottery_fn(applications_long)
+            student_ids, rankings, matches = run_matching(
+                applications_long, school_table, rng, student_lottery=student_lottery
+            )
+            runs.append(compute_region_buckets(student_ids, rankings, matches, student_region))
+            if args.select_best_of_n:
+                replicate_unmatched = 100.0 * (np.asarray(matches) < 0).mean()
+                scores.append(abs(replicate_unmatched - real_observed_unmatched))
+                print(f"    unmatched={replicate_unmatched:.2f}%  |diff from real|={scores[-1]:.2f}pp")
+
+        if args.select_best_of_n:
+            best_i = int(np.argmin(scores))
+            print(f"  {label}: keeping run {best_i + 1} (closest to real, |diff|={scores[best_i]:.2f}pp)")
+            buckets = runs[best_i]
+            ci95 = pd.DataFrame(0.0, index=buckets.index, columns=buckets.columns)
+            return buckets, ci95
+
+        concat = pd.concat(runs)
+        buckets = concat.groupby(level=0).mean()
+        # ddof=0: pandas' default ddof=1 gives NaN at n_stb_runs=1 (0 degrees of
+        # freedom), which breaks downstream plot y-limits.
+        ci95 = 1.96 * concat.groupby(level=0).std(ddof=0) / np.sqrt(args.n_stb_runs)
+        return buckets, ci95
+
     print(f"Running {args.n_stb_runs} MTB replicates (real priority, per-school lottery)...")
-    mtb_runs = []
-    for run in range(args.n_stb_runs):
-        print(f"  MTB run {run + 1}/{args.n_stb_runs}...")
-        indv_df = get_indv_df_for_replicate(rng)
-        applications_long = build_applications_long(indv_df)
-        student_region = build_student_region(indv_df)
-        student_ids, rankings, matches = run_matching(applications_long, school_table, rng, student_lottery=None)
-        mtb_runs.append(compute_region_buckets(student_ids, rankings, matches, student_region))
-    mtb_concat = pd.concat(mtb_runs)
-    mtb_buckets = mtb_concat.groupby(level=0).mean()
-    mtb_ci95 = 1.96 * mtb_concat.groupby(level=0).std() / np.sqrt(args.n_stb_runs)
+    mtb_buckets, mtb_ci95 = run_condition('MTB', lambda _: None)
 
     print(f"Running {args.n_stb_runs} STB replicates...")
-    stb_runs = []
-    for run in range(args.n_stb_runs):
-        print(f"  STB run {run + 1}/{args.n_stb_runs}...")
-        indv_df = get_indv_df_for_replicate(rng)
-        applications_long = build_applications_long(indv_df)
-        student_region = build_student_region(indv_df)
+    def stb_lottery(applications_long):
         all_student_ids = sorted(applications_long['mrun'].unique().tolist())
-        student_lottery = {sid: float(rng.random()) for sid in all_student_ids}
-        student_ids, rankings, matches = run_matching(
-            applications_long, school_table, rng, student_lottery=student_lottery
-        )
-        stb_runs.append(compute_region_buckets(student_ids, rankings, matches, student_region))
-    stb_concat = pd.concat(stb_runs)
-    stb_buckets = stb_concat.groupby(level=0).mean()
-    stb_ci95 = 1.96 * stb_concat.groupby(level=0).std() / np.sqrt(args.n_stb_runs)
+        return {sid: float(rng.random()) for sid in all_student_ids}
+    stb_buckets, stb_ci95 = run_condition('STB', stb_lottery)
 
     regions = [r for r in ROMAN_ORDER if r in mtb_buckets.index and r in stb_buckets.index]
 
@@ -221,10 +249,13 @@ def main():
 
     ax.set_xticks(x)
     ax.set_xticklabels(regions)
-    ax.set_xlabel('Region', fontsize=12)
-    ax.set_ylabel('Match Rate (%)', fontsize=12)
-    ax.set_ylim(0, 100)
-    ax.legend(ncol=3, fontsize=14, loc='upper center', bbox_to_anchor=(0.5, 1.1), frameon=False)
+    ax.set_xlabel('Region', fontsize=15)
+    ax.set_ylabel('Match Rate (%)', fontsize=15)
+    ax.tick_params(labelsize=12)
+    ax.set_ylim(0, 112)
+    ax.set_yticks([0, 20, 40, 60, 80, 100])
+    ax.legend(ncol=3, fontsize=12.5, loc='upper center', bbox_to_anchor=(0.5, 1.0),
+              frameon=False)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 

@@ -22,8 +22,8 @@ DECILE_COLORS = {
     '10': '#67001f',
 }
 
-FONT   = 15
-LEGEND_FONT   = 12
+FONT   = 18
+LEGEND_FONT   = 14
 LWIDTH_OVERALL = 2.5
 LWIDTH_GROUP   = 1.5
 MSIZE  = 6
@@ -140,7 +140,7 @@ def plot_sweep(df, overall_df, group_data_matched, group_data_stats,
             "with the current code to add it, then regenerate the sweep CSVs."
         )
 
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    fig, axes = plt.subplots(1, 3, figsize=(18, 3.6))
 
     if overall_vals is None:
         overall_vals = {
@@ -198,9 +198,12 @@ def plot_sweep(df, overall_df, group_data_matched, group_data_stats,
     axes[2].set_ylabel('Average Matched Rank', fontsize=FONT)
 
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, fontsize=LEGEND_FONT, loc='lower center',
-               bbox_to_anchor=(0.5, legend_y), ncol=len(labels), frameon=legend_frameon, borderaxespad=0.1)
-    fig.subplots_adjust(top=subplots_top)
+    ncol_legend = 1 if len(labels) <= 6 else 2
+    right_edge = 0.975 if ncol_legend == 1 else 0.955
+    fig.subplots_adjust(right=right_edge)
+    fig.legend(handles, labels, fontsize=LEGEND_FONT, loc='center left',
+               bbox_to_anchor=(right_edge + 0.005, 0.5), bbox_transform=fig.transFigure,
+               ncol=ncol_legend, frameon=legend_frameon, borderaxespad=0.0)
 
     fig.savefig(output_path, dpi=200, bbox_inches='tight')
     plt.close(fig)

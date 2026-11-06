@@ -179,8 +179,24 @@ def build_synthetic_indv_df(
         all_districts.extend([d] * n)
         all_lengths.extend(lengths.tolist())
 
+    out = _attach_synthetic_attributes(
+        all_rankings, all_districts, capacity_df, rng, calibration, female_rate, subdivision_col, verbose
+    )
     if verbose:
-        print("Synthesizing priority attributes for sampled rankings...")
+        achieved_lengths = pd.Series(all_lengths)
+        print(f"\nAchieved list-length distribution:\n{achieved_lengths.value_counts(normalize=True).sort_index()}")
+    return out
+
+
+def _attach_synthetic_attributes(all_rankings, all_districts, capacity_df, rng, calibration, female_rate,
+                                  subdivision_col, verbose):
+    """Shared tail of build_synthetic_indv_df: given rankings + district assignments
+    (sampled fresh, or loaded from a saved _synthetic_rankings.csv -- the caller
+    doesn't matter here), synthesize the priority/female/Region attributes those
+    rankings don't carry, calibrated from real data. Returns the full --individual
+    schema DataFrame."""
+    if verbose:
+        print("Synthesizing priority attributes for rankings...")
     prepared = prepare_chile_numba_inputs_from_rankings(
         truncated_rankings=all_rankings,
         capacity_rows=capacity_df,
@@ -212,16 +228,67 @@ def build_synthetic_indv_df(
     app['rbd'] = split[0]
     app['program_code'] = split[1]
 
-    out = app[['mrun', 'rbd', 'program_code', 'preference_number', 'female', 'Region'] + PRIORITY_COLS]
+    return app[['mrun', 'rbd', 'program_code', 'preference_number', 'female', 'Region'] + PRIORITY_COLS]
+
+
+def build_indv_df_from_saved_rankings(
+    synthetic_rankings_csv: str,
+    real_indv_df: pd.DataFrame,
+    capacity_df: pd.DataFrame,
+    rng: np.random.Generator,
+    subdivision_col: str = 'Region',
+    verbose: bool = True,
+) -> pd.DataFrame:
+    """
+    Literal reuse of a saved _synthetic_rankings.csv (written by
+    chilean_experiment_driver.py --save_best_sample -- the specific M-draw at
+    the best EM training iteration, selected as closest to that iteration's
+    own M-draw mean) as the fixed preference profile for STB/MTB figures,
+    instead of drawing a fresh independent sample as build_synthetic_indv_df
+    does. This is the SAME underlying sample Fig 2/16's "Simulated" numbers
+    came from -- the CSV only has rankings (student_id, district,
+    choice_1..choice_N), not the priority/female/Region attributes those
+    figures also need, so this synthesizes just those (calibrated from real
+    data, same as build_synthetic_indv_df), reusing the real rankings as-is.
+
+    Returned schema matches build_synthetic_indv_df's --individual output, so
+    this can be passed directly as --individual to chilean_real_welfare_comparison.py,
+    chile_lottery_decile_stb_mtb.py, chile_region_cumulative_stb_mtb.py.
+    """
+    rankings_df = pd.read_csv(synthetic_rankings_csv)
+    choice_cols = sorted(
+        [c for c in rankings_df.columns if c.startswith('choice_')],
+        key=lambda c: int(c.split('_')[1]),
+    )
     if verbose:
-        achieved_lengths = pd.Series(all_lengths)
-        print(f"\nAchieved list-length distribution:\n{achieved_lengths.value_counts(normalize=True).sort_index()}")
-    return out
+        print(f"  Loaded {len(rankings_df):,} saved rankings from {synthetic_rankings_csv}")
+
+    all_rankings, all_districts = [], []
+    for _, row in rankings_df.iterrows():
+        ranking = [row[c] for c in choice_cols if pd.notna(row[c])]
+        all_rankings.append(ranking)
+        all_districts.append(row['district'])
+
+    female_rate = real_indv_df.drop_duplicates('mrun')['female'].mean()
+    calibration = estimate_priority_calibration(real_indv_df)
+    if verbose:
+        print(f"  Female rate: {female_rate:.3f}")
+        print(f"  Priority calibration: {calibration}")
+
+    return _attach_synthetic_attributes(
+        all_rankings, all_districts, capacity_df, rng, calibration, female_rate, subdivision_col, verbose
+    )
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--params_pkl', required=True)
+    parser.add_argument('--params_pkl', default=None,
+                         help='Draw a fresh synthetic sample from this fitted Mallows mixture. '
+                              'Mutually exclusive with --from_saved_rankings.')
+    parser.add_argument('--from_saved_rankings', default=None,
+                         help='Reuse a saved _synthetic_rankings.csv (from chilean_experiment_driver.py '
+                              '--save_best_sample) instead of drawing a fresh sample -- the literal data '
+                              "Fig 2/16's numbers came from. Mutually exclusive with --params_pkl.")
     parser.add_argument('--real_individual', required=True,
                          help='Real indv_df, used only to calibrate list-length distribution, '
                               'female rate, and priority-flag base rates.')
@@ -244,6 +311,8 @@ def main():
     parser.add_argument('--output', default='synthetic_indv_df.csv')
     args = parser.parse_args()
 
+    if bool(args.params_pkl) == bool(args.from_saved_rankings):
+        parser.error('Pass exactly one of --params_pkl or --from_saved_rankings.')
     if args.district is not None and args.n_students is None:
         parser.error('--n_students is required when --district is given.')
 
@@ -251,25 +320,27 @@ def main():
     real_indv_df = load_df(args.real_individual)
     capacity_df = load_df(args.capacity)
 
-    with open(args.params_pkl, 'rb') as f:
-        params = pickle.load(f)
-
     rng = np.random.default_rng(args.seed)
 
-    out = build_synthetic_indv_df(
-        params, real_indv_df, capacity_df, rng,
-        subdivision_col=args.subdivision_col, district=args.district,
-        n_students=args.n_students, total_students=args.total_students,
-        n_jobs=args.n_jobs, verbose=True,
-    )
+    if args.from_saved_rankings:
+        out = build_indv_df_from_saved_rankings(
+            args.from_saved_rankings, real_indv_df, capacity_df, rng,
+            subdivision_col=args.subdivision_col, verbose=True,
+        )
+    else:
+        with open(args.params_pkl, 'rb') as f:
+            params = pickle.load(f)
+        out = build_synthetic_indv_df(
+            params, real_indv_df, capacity_df, rng,
+            subdivision_col=args.subdivision_col, district=args.district,
+            n_students=args.n_students, total_students=args.total_students,
+            n_jobs=args.n_jobs, verbose=True,
+        )
     out.to_csv(args.output, index=False)
 
     print(f"\nSaved {out['mrun'].nunique():,} students ({len(out):,} application rows) to {args.output}")
     print("This file can be passed directly as --individual to the Fig 4/6/8 scripts, "
-          "alongside the same real --capacity file. Those scripts can also take --params_pkl/"
-          "--real_individual directly instead of a pre-built --individual file, resampling a "
-          "fresh synthetic replicate (like this one) each run for a CI that also captures "
-          "preference-sampling randomness, not just the lottery.")
+          "alongside the same real --capacity file.")
 
 
 if __name__ == '__main__':

@@ -102,9 +102,23 @@ def compute_student_records(student_ids, student_rankings, matches, lottery_df, 
             'matched': matched_idx >= 0,
             'rank_pos': rank_pos,
             'decile_val': decile_val.get(i, np.nan),
+            'list_length': len(ranking),
         })
     df = pd.DataFrame(records).dropna(subset=['decile_val'])
-    df['decile'] = pd.qcut(df['decile_val'], N_DECILES, labels=range(1, N_DECILES + 1))
+
+    # Deciles are assigned WITHIN list-length strata, then pooled, rather than
+    # globally. A raw global qcut on decile_val confounds list length with
+    # luck: min/median/mean-of-top-k statistics are mechanically higher for
+    # short lists (fewer draws), so short-list students get pushed into the
+    # "unlucky" extreme deciles regardless of their actual lottery draws.
+    # Stratifying removes that composition artifact while keeping every
+    # student (unlike dropping students with list_length < topk). Percentile
+    # rank is used instead of qcut per stratum since qcut errors out on
+    # strata too small/sparse to form N_DECILES non-empty bins (e.g. rare
+    # long list lengths), while rank(pct=True) degrades gracefully.
+    df['list_length_bin'] = df['list_length'].clip(upper=9)
+    pct = df.groupby('list_length_bin')['decile_val'].rank(pct=True)
+    df['decile'] = np.ceil(pct * N_DECILES).clip(1, N_DECILES).astype(int)
     return df
 
 
@@ -125,16 +139,25 @@ def decile_metrics(df):
     return pd.DataFrame(rows).set_index('decile')
 
 
-def run_replicates(get_indv_df_for_replicate, school_table, rng, n_runs, agg_names, topk):
+def run_replicates(get_indv_df_for_replicate, school_table, rng, n_runs, agg_names, topk,
+                    real_observed_unmatched=None):
     """
     Runs n_runs replicates once. Each replicate matches STB once and MTB once,
     then computes decile metrics for every name in agg_names from that SAME
     MTB match -- MTB is never re-run per aggregation. Returns
     (stats, decile_value_pool) where stats has keys 'STB' plus every agg_name,
     each {'mean': df, 'ci95': df}.
+
+    If real_observed_unmatched is given (a %, from the real data's
+    matched_first_round column), instead of averaging all n_runs this keeps
+    only the single replicate whose STB-condition overall unmatched rate is
+    closest to it, with ci95=0 -- same "best of many, scored against real
+    data" regime as the real-profile Fig 2/16 figures, rather than this
+    script's usual unbiased replicate average.
     """
     metrics_by_name = {'STB': [], **{name: [] for name in agg_names}}
     decile_value_pool = {'STB': [], **{name: [] for name in agg_names}}
+    scores = []
 
     for run in range(n_runs):
         print(f"Run {run + 1}/{n_runs}...")
@@ -152,6 +175,10 @@ def run_replicates(get_indv_df_for_replicate, school_table, rng, n_runs, agg_nam
         df = compute_student_records(student_ids, rankings, matches, lottery_df, 'single')
         metrics_by_name['STB'].append(decile_metrics(df))
         decile_value_pool['STB'].append(df['decile_val'].to_numpy())
+        if real_observed_unmatched is not None:
+            replicate_unmatched = 100.0 * (np.asarray(matches) < 0).mean()
+            scores.append(abs(replicate_unmatched - real_observed_unmatched))
+            print(f"    STB unmatched={replicate_unmatched:.2f}%  |diff from real|={scores[-1]:.2f}pp")
 
         student_ids, rankings, matches, lottery_df = run_matching(
             applications_long, school_table, rng,
@@ -163,11 +190,22 @@ def run_replicates(get_indv_df_for_replicate, school_table, rng, n_runs, agg_nam
             metrics_by_name[name].append(decile_metrics(df))
             decile_value_pool[name].append(df['decile_val'].to_numpy())
 
+    if real_observed_unmatched is not None:
+        best_i = int(np.argmin(scores))
+        print(f"Keeping run {best_i + 1} (closest to real, |diff|={scores[best_i]:.2f}pp)")
+        stats = {}
+        for name, records in metrics_by_name.items():
+            mean = records[best_i]
+            stats[name] = {'mean': mean, 'ci95': pd.DataFrame(0.0, index=mean.index, columns=mean.columns)}
+        return stats, decile_value_pool
+
     stats = {}
     for name, records in metrics_by_name.items():
         grouped = pd.concat(records).groupby(level=0)
         mean = grouped.mean()
-        std = grouped.std()
+        # ddof=0: pandas' default ddof=1 gives NaN at n_runs=1 (0 degrees of
+        # freedom), which breaks downstream plot y-limits.
+        std = grouped.std(ddof=0)
         stats[name] = {'mean': mean, 'ci95': 1.96 * std / np.sqrt(n_runs)}
 
     return stats, decile_value_pool
@@ -179,22 +217,18 @@ DECILE_STYLES = {'STB': '-', 'MTB': '--'}
 DECILE_MARKERS = {'pct_unmatched': 'o', 'top1_pct': 's', 'top5_pct': '^', 'avg_rank': 'D'}
 
 
-def plot_decile_axes(ax, ax2, stats, mtb_name, deciles, markersize=6, linewidth=1.8, capsize=5, capthick=2):
-    """Draw STB + stats[mtb_name] (MTB) errorbar lines onto ax (match rate) / ax2 (avg rank)."""
+def plot_decile_axes(ax, ax2, stats, mtb_name, deciles, markersize=6, linewidth=1.8):
+    """Draw STB + stats[mtb_name] (MTB) mean lines onto ax (match rate) / ax2 (avg rank). No CI markers."""
     for cond, name in [('STB', 'STB'), ('MTB', mtb_name)]:
         for metric in ['pct_unmatched', 'top1_pct', 'top5_pct']:
             mean_vals = stats[name]['mean'][metric].reindex(deciles)
-            ci_vals = stats[name]['ci95'][metric].reindex(deciles)
-            ax.errorbar(deciles, mean_vals, yerr=ci_vals,
-                        color=DECILE_COLORS[metric], linestyle=DECILE_STYLES[cond], marker=DECILE_MARKERS[metric],
-                        markersize=markersize, linewidth=linewidth,
-                        ecolor='#000000', elinewidth=capthick, capsize=capsize, capthick=capthick, zorder=6)
+            ax.plot(deciles, mean_vals,
+                    color=DECILE_COLORS[metric], linestyle=DECILE_STYLES[cond], marker=DECILE_MARKERS[metric],
+                    markersize=markersize, linewidth=linewidth, zorder=6)
         mean_vals = stats[name]['mean']['avg_rank'].reindex(deciles)
-        ci_vals = stats[name]['ci95']['avg_rank'].reindex(deciles)
-        ax2.errorbar(deciles, mean_vals, yerr=ci_vals,
-                    color=DECILE_COLORS['avg_rank'], linestyle=DECILE_STYLES[cond], marker=DECILE_MARKERS['avg_rank'],
-                    markersize=markersize, linewidth=linewidth,
-                    ecolor='#000000', elinewidth=capthick, capsize=capsize, capthick=capthick, zorder=6)
+        ax2.plot(deciles, mean_vals,
+                  color=DECILE_COLORS['avg_rank'], linestyle=DECILE_STYLES[cond], marker=DECILE_MARKERS['avg_rank'],
+                  markersize=markersize, linewidth=linewidth, zorder=6)
     ax2.tick_params(axis='y', colors=DECILE_COLORS['avg_rank'])
     ax2.spines['right'].set_color(DECILE_COLORS['avg_rank'])
     ax.spines['top'].set_visible(False)
@@ -258,6 +292,13 @@ def main():
                               'figure with all OTHER aggregations (CONDENSED_AGGS) as subplots, sharing '
                               'one legend. Skips the distribution plot / CSV dump / console diagnostics.')
     parser.add_argument('--output_condensed', default='fig4_chile_lottery_decile_condensed.png')
+    parser.add_argument('--select_best_of_n', action='store_true',
+                         help='Instead of averaging the n_runs replicates, draw all of them and keep only '
+                              'the single replicate whose STB-condition overall unmatched rate is closest '
+                              "to the real observed unmatched rate (from --real_individual's "
+                              'matched_first_round column). No CI -- matches the "best of many, scored '
+                              'against real data" regime as the real-profile Fig 2/16 figures. Requires '
+                              '--params_pkl.')
     parser.add_argument('--seed', type=int, default=DATA_GENERATION_SEED)
     args = parser.parse_args()
 
@@ -274,6 +315,8 @@ def main():
         parser.error('Pass exactly one of --individual or --params_pkl.')
     if args.params_pkl and not args.real_individual:
         parser.error('--params_pkl requires --real_individual (for calibration).')
+    if args.select_best_of_n and not args.params_pkl:
+        parser.error('--select_best_of_n requires --params_pkl (needs independent preference draws to select among).')
 
     print("Loading data...")
     capacity_df = load_df(args.capacity)
@@ -303,11 +346,18 @@ def main():
 
     rng = np.random.default_rng(args.seed)
 
+    real_observed_unmatched = None
+    if args.select_best_of_n:
+        real_matched = real_indv_df_for_calibration.groupby('mrun')['matched_first_round'].max()
+        real_observed_unmatched = 100.0 * (1.0 - real_matched.mean())
+        print(f"  Real observed unmatched rate (selection target): {real_observed_unmatched:.2f}%")
+
     if args.condensed:
         print(f"  Condensed aggregations: {CONDENSED_AGGS}")
         print(f"  Output: {args.output_condensed}")
         stats, _ = run_replicates(get_indv_df_for_replicate, school_table, rng, args.n_runs,
-                                   CONDENSED_AGGS, args.mtb_decile_topk)
+                                   CONDENSED_AGGS, args.mtb_decile_topk,
+                                   real_observed_unmatched=real_observed_unmatched)
         deciles = list(range(1, N_DECILES + 1))
 
         fig, axes = plt.subplots(2, 3, figsize=(16, 9))
@@ -318,7 +368,7 @@ def main():
             ax2 = ax.twinx()
             twin_axes.append(ax2)
             plot_decile_axes(ax, ax2, stats, name, deciles,
-                              markersize=4, linewidth=1.2, capsize=3, capthick=1)
+                              markersize=4, linewidth=1.2)
             ax.set_title(AGG_TITLES[name], fontsize=11)
             ax.set_xlabel('Lottery Decile', fontsize=9)
             ax.set_xticks(deciles)
@@ -355,6 +405,7 @@ def main():
 
     metrics_by_condition = {'STB': [], 'MTB': []}
     decile_value_pool = {'STB': [], 'MTB': []}
+    scores = []
     for run in range(args.n_runs):
         print(f"Run {run + 1}/{args.n_runs}...")
         indv_df = get_indv_df_for_replicate(rng)
@@ -371,6 +422,10 @@ def main():
         df = compute_student_records(student_ids, rankings, matches, lottery_df, 'single')
         metrics_by_condition['STB'].append(decile_metrics(df))
         decile_value_pool['STB'].append(df['decile_val'].to_numpy())
+        if real_observed_unmatched is not None:
+            replicate_unmatched = 100.0 * (np.asarray(matches) < 0).mean()
+            scores.append(abs(replicate_unmatched - real_observed_unmatched))
+            print(f"    STB unmatched={replicate_unmatched:.2f}%  |diff from real|={scores[-1]:.2f}pp")
 
         student_ids, rankings, matches, lottery_df = run_matching(
             applications_long, school_table, rng,
@@ -382,11 +437,20 @@ def main():
         decile_value_pool['MTB'].append(df['decile_val'].to_numpy())
 
     stats = {}
-    for cond in ['STB', 'MTB']:
-        grouped = pd.concat(metrics_by_condition[cond]).groupby(level=0)
-        mean = grouped.mean()
-        std = grouped.std()
-        stats[cond] = {'mean': mean, 'ci95': 1.96 * std / np.sqrt(args.n_runs)}
+    if real_observed_unmatched is not None:
+        best_i = int(np.argmin(scores))
+        print(f"Keeping run {best_i + 1} (closest to real, |diff|={scores[best_i]:.2f}pp)")
+        for cond in ['STB', 'MTB']:
+            mean = metrics_by_condition[cond][best_i]
+            stats[cond] = {'mean': mean, 'ci95': pd.DataFrame(0.0, index=mean.index, columns=mean.columns)}
+    else:
+        for cond in ['STB', 'MTB']:
+            grouped = pd.concat(metrics_by_condition[cond]).groupby(level=0)
+            mean = grouped.mean()
+            # ddof=0: pandas' default ddof=1 gives NaN at n_runs=1 (0 degrees of
+            # freedom), which breaks downstream plot y-limits.
+            std = grouped.std(ddof=0)
+            stats[cond] = {'mean': mean, 'ci95': 1.96 * std / np.sqrt(args.n_runs)}
 
     plot_decile_value_distributions(
         np.concatenate(decile_value_pool['STB']),
@@ -431,44 +495,54 @@ def main():
     MARKERS = {'pct_unmatched': 'o', 'top1_pct': 's', 'top5_pct': '^', 'avg_rank': 'D'}
 
     deciles = list(range(1, N_DECILES + 1))
-    fig, ax = plt.subplots(figsize=(7, 5))
+    # Exactly Fig 3's approach (temp_update_fig3.py): fixed (5.0, 2.9) axes
+    # canvas, legend floated ABOVE via bbox_to_anchor y>1 rather than reserved
+    # inside the canvas via tight_layout(rect=...) -- bbox_inches='tight' at
+    # save time expands the saved PNG to include that overflow, so the actual
+    # plot area matches Fig 3's exactly regardless of legend size.
+    fig, ax = plt.subplots(figsize=(5.0, 3.3))
     ax2 = ax.twinx()
     for cond in ['STB', 'MTB']:
         for metric in ['pct_unmatched', 'top1_pct', 'top5_pct']:
             mean_vals = stats[cond]['mean'][metric].reindex(deciles)
-            ci_vals = stats[cond]['ci95'][metric].reindex(deciles)
-            ax.errorbar(deciles, mean_vals, yerr=ci_vals,
-                        color=COLORS[metric], linestyle=STYLES[cond], marker=MARKERS[metric],
-                        markersize=6, linewidth=1.8, label=f'{LABELS[metric]} ({cond})',
-                        ecolor='#000000', elinewidth=2, capsize=5, capthick=2, zorder=6)
+            ax.plot(deciles, mean_vals,
+                    color=COLORS[metric], linestyle=STYLES[cond], marker=MARKERS[metric],
+                    markersize=4, linewidth=1.4, label=f'{LABELS[metric]} ({cond})', zorder=6)
         mean_vals = stats[cond]['mean']['avg_rank'].reindex(deciles)
-        ci_vals = stats[cond]['ci95']['avg_rank'].reindex(deciles)
-        ax2.errorbar(deciles, mean_vals, yerr=ci_vals,
-                    color=COLORS['avg_rank'], linestyle=STYLES[cond], marker=MARKERS['avg_rank'],
-                    markersize=6, linewidth=1.8, label=f"{LABELS['avg_rank']} ({cond})",
-                    ecolor='#000000', elinewidth=2, capsize=5, capthick=2, zorder=6)
+        ax2.plot(deciles, mean_vals,
+                  color=COLORS['avg_rank'], linestyle=STYLES[cond], marker=MARKERS['avg_rank'],
+                  markersize=4, linewidth=1.4, label=f"{LABELS['avg_rank']} ({cond})", zorder=6)
 
-    ax.set_xlabel('Lottery Decile', fontsize=12)
-    ax.set_ylabel('Match Rate (%)', fontsize=12)
-    ax2.set_ylabel('Avg Rank (matched)', fontsize=12, color=COLORS['avg_rank'])
+    ax.set_xlabel('Lottery Decile', fontsize=13)
+    ax.set_ylabel('Match Rate (%)', fontsize=13)
+    ax2.set_ylabel('Avg Rank (matched)', fontsize=13, color=COLORS['avg_rank'])
+    ax2.tick_params(axis='y', labelcolor=COLORS['avg_rank'])
     ax.set_xticks(deciles)
-    ax.margins(y=0.08)
-    ax2.margins(y=0.08)
-    ax2.tick_params(axis='y', colors=COLORS['avg_rank'])
+    ax.tick_params(labelsize=11)
+    ax2.tick_params(labelsize=11)
+    ax.set_ylim(-2, 105)  # matches Fig 3's ax1.set_ylim(-2, 105) exactly
     ax2.spines['right'].set_color(COLORS['avg_rank'])
     ax.spines['top'].set_visible(False)
+    ax2.spines['top'].set_visible(False)
 
+    # One-row legend like Fig 3's, all 6 entries (4 metrics + STB/MTB) --
+    # slightly smaller font/spacing than Fig 3's 4-entry version so it still
+    # fits on one line at the same width.
     metric_handles = [
         plt.Line2D([], [], color=COLORS[m], marker=MARKERS[m], linestyle='-', label=LABELS[m])
         for m in ['pct_unmatched', 'top1_pct', 'top5_pct', 'avg_rank']
     ]
     style_handles = [plt.Line2D([], [], color='gray', linestyle=STYLES[c], label=c) for c in ['STB', 'MTB']]
     all_handles = metric_handles + style_handles
-    fig.legend(handles=all_handles, loc='lower center', bbox_to_anchor=(0.5, 1.0),
-               ncol=len(all_handles), fontsize=10, frameon=False)
+    # mode='expand' stretches the legend to exactly fill bbox_to_anchor's width
+    # (here 0 to 1 in axes-fraction coords, i.e. the full plot width) instead
+    # of guessing a center x-offset by trial and error.
+    ax.legend(handles=all_handles, fontsize=9, frameon=False, ncol=len(all_handles),
+              loc='lower left', bbox_to_anchor=(0.0, 1.02, 1.0, 0.08), mode='expand',
+              handlelength=1.2, handletextpad=0.25, columnspacing=1.6, markerscale=0.8)
 
-    fig.tight_layout(rect=[0, 0, 1, 0.96])
-    fig.savefig(args.output, dpi=200, bbox_inches='tight')
+    fig.tight_layout()
+    fig.savefig(args.output, dpi=300, bbox_inches='tight')
     plt.close(fig)
     print(f"Saved: {args.output}")
 

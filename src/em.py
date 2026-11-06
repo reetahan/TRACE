@@ -306,15 +306,31 @@ def run_single_simulation(
 
         region_overrides = priority_config.get('region_overrides', {})
         if region_overrides:
-            first_region = next(iter(region_overrides.values()))
-            fracs = first_region.get('student_attribute_fractions', {})
-            tiers = first_region.get('priority_tiers', [])
+            # Population-weighted average across every region in the config, not just
+            # whichever one happens to be first (that single-region shortcut applied
+            # Santiago's rates to the whole country, systematically miscalibrating the
+            # ~68% of students outside Santiago).
+            total_n = sum(r.get('n_students', 0) for r in region_overrides.values()) or 1
+
+            def _tier_rate(region, group, default):
+                return next(
+                    (t['fraction_eligible'] for t in region.get('priority_tiers', []) if t['group'] == group),
+                    default,
+                )
+
+            def _weighted(extractor):
+                return sum(
+                    r.get('n_students', 0) * extractor(r) for r in region_overrides.values()
+                ) / total_n
+
             calibration = {
-                'priority_student_student_rate': fracs.get('disadvantaged', 0.6889),
-                'priority_sibling_student_rate': next((t['fraction_eligible'] for t in tiers if t['group'] == 'sibling'), 0.1539),
-                'priority_parent_civil_servant_student_rate': next((t['fraction_eligible'] for t in tiers if t['group'] == 'working_parent'), 0.0066),
-                'priority_ex_student_student_rate': next((t['fraction_eligible'] for t in tiers if t['group'] == 'returning_student'), 0.0521),
-                'priority_already_registered_student_rate': fracs.get('already_registered', 0.1398),
+                'priority_student_student_rate': _weighted(
+                    lambda r: r.get('student_attribute_fractions', {}).get('disadvantaged', 0.6889)),
+                'priority_sibling_student_rate': _weighted(lambda r: _tier_rate(r, 'sibling', 0.1539)),
+                'priority_parent_civil_servant_student_rate': _weighted(lambda r: _tier_rate(r, 'working_parent', 0.0066)),
+                'priority_ex_student_student_rate': _weighted(lambda r: _tier_rate(r, 'returning_student', 0.0521)),
+                'priority_already_registered_student_rate': _weighted(
+                    lambda r: r.get('student_attribute_fractions', {}).get('already_registered', 0.1398)),
             }
         else:
             calibration = None
@@ -563,29 +579,29 @@ def initialize_parameters_global_mixture(districts, df, K=1, rng=None, init_phis
     else:
         global_phis = rng.beta(6, 1, K)
         global_phis = np.clip(global_phis, 0.5, 0.99)
-    
+
     global_weights = np.ones(K) / K  # Uniform initially
-    
+
     params = {
         'global_phis': global_phis,
         'global_weights': global_weights,
         'districts': {}
     }
-    
+
     # District-specific central rankings
     for district in districts:
         df_district = df[df['Residential District'] == district]
         schools_list = df_district['School DBN'].values
-        
+
         obs_total = df_district.set_index('School DBN')['Ratio'].to_dict()
-        
+
         central_ranking = sorted(schools_list, key=lambda s: obs_total[s], reverse=True)
-        
+
         params['districts'][district] = {
             'schools': schools_list,
             'central_ranking': central_ranking
         }
-    
+
     return params
 
 def compute_log_likelihood_gaussian_all_districts(params_global, observed_agg,

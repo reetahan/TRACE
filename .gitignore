@@ -22,3 +22,4 @@
 outputs/
 scripts/
 .job_snapshots/
+.claude/

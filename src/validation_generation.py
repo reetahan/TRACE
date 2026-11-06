@@ -22,6 +22,24 @@ METRIC_LABELS = {
     'unmatched': 'Unmatched Rate (%)',
 }
 
+
+def get_metric_labels(n_stats, mode):
+    """Labels for the n_stats-1 top-p slots + 'unmatched' in best_block['obs']/['sim'].
+
+    NYC's real match-stats data only has cumulative cutoffs at 3/5/10 (DATA3's
+    "Match to Choice-District" sheet), not one per consecutive rank -- so for
+    NYC (n_stats==4: 3 cutoffs + unmatched) the slots must be labeled with
+    their TRUE cutoffs, not positionally as top1/top2/top3. Mislabeling this
+    was a real bug: Fig 2's "Top-3 Match Rate" panel was actually plotting
+    true top-10 data, found by cross-checking against a from-scratch rebuild.
+    Chile's real data has one cutoff per consecutive rank 1..10, so the
+    positional label IS the true cutoff there -- only NYC's n_stats==4 case
+    needs the override.
+    """
+    if mode == 'nyc' and n_stats == 4:
+        return list(METRICS)  # ['top3', 'top5', 'top10', 'unmatched']
+    return [f'top{p}' for p in range(1, n_stats)] + ['unmatched']
+
 OBS_COLOR  = "#0a17d1"
 SIM_COLOR  = "#19d308"
 FONT_SIZE  = 10
@@ -82,14 +100,14 @@ def get_metric_label(key):
     return key
 
 
-def print_match_rate_analysis(best_block):
+def print_match_rate_analysis(best_block, mode='chile'):
     """Print all available match-rate metrics overall and by district."""
     if not best_block:
         return
 
     sample_vals = next(iter(best_block.values()))
     n_stats = len(sample_vals['obs'])
-    metrics = [f'top{p}' for p in range(1, n_stats)] + ['unmatched']
+    metrics = get_metric_labels(n_stats, mode)
     metric_indices = {metric: index for index, metric in enumerate(metrics)}
 
     print("\n-- Match Rate Analysis ------------------------")
@@ -345,7 +363,7 @@ if __name__ == '__main__':
     if best_block:
         sample_vals = next(iter(best_block.values()))
         n_stats = len(sample_vals['obs'])
-        metrics_here = [f'top{p}' for p in range(1, n_stats)] + ['unmatched']
+        metrics_here = get_metric_labels(n_stats, args.mode)
         idx_map = {k: i for i, k in enumerate(metrics_here)}
 
         if 'top3' in idx_map:
@@ -387,6 +405,16 @@ if __name__ == '__main__':
             print(f"  Best {n_best} by |diff|: " +
                   ", ".join(f"{d} (obs-sim={signed_by_d[d]:+.2f}pp)" for d, _ in ranked[:n_best]))
 
+    if best_dist_util:
+        util_districts = list(best_dist_util.keys())
+        util_signed = {d: v['obs'] - v['sim'] for d, v in best_dist_util.items()}
+        util_ranked = sorted(util_signed.items(), key=lambda x: abs(x[1]))
+        print(f"\n── Full Ranking by |diff| on utilization, ascending ──")
+        for d, sd in util_ranked:
+            direction = 'UNDERestimate (sim<obs)' if sd > 0 else 'OVERestimate (sim>obs)'
+            print(f"  {str(d):>25}: obs-sim={sd:+.2f}pp  ({direction})")
+        print(f"──────────────────────────────────────────────\n")
+
     if args.match_stats:
         match_stats_df = pd.read_excel(args.match_stats)
         province_students = match_stats_df.set_index('Provincia')['n_students'].to_dict()
@@ -411,7 +439,7 @@ if __name__ == '__main__':
         if best_block:
             sample_vals_r = next(iter(best_block.values()))
             n_stats_r = len(sample_vals_r['obs'])
-            idx_map_r = {k: i for i, k in enumerate([f'top{p}' for p in range(1, n_stats_r)] + ['unmatched'])}
+            idx_map_r = {k: i for i, k in enumerate(get_metric_labels(n_stats_r, args.mode))}
             if 'top3' in idx_map_r:
                 top3_idx_r = idx_map_r['top3']
                 regions_list = list(best_block.keys())
@@ -426,7 +454,7 @@ if __name__ == '__main__':
                 print(f"  Worst-fit region: {ranked_r[-1]}")
                 print(f"──────────────────────────────────────────────\n")
 
-    print_match_rate_analysis(best_block)
+    print_match_rate_analysis(best_block, mode=args.mode)
 
     print(f"\n── Validation Stats ──────────────────────────")
     print(f"  Overall log-likelihood (best iter): {best_ll:.2f}")
@@ -443,7 +471,7 @@ if __name__ == '__main__':
     block_rows = []
     for d, vals in best_block.items():
         n_stats_row = len(vals['obs'])
-        metrics_row = [f'top{p}' for p in range(1, n_stats_row)] + ['unmatched']
+        metrics_row = get_metric_labels(n_stats_row, args.mode)
         row = {'district': d}
         for i, m in enumerate(metrics_row):
             row[f'obs_{m}'] = vals['obs'][i]
@@ -453,6 +481,16 @@ if __name__ == '__main__':
     pd.DataFrame(block_rows).to_csv(out_dir / f'{args.mode}_val_district_fit_1.csv', index=False)
     print(f"Saved: {args.mode}_val_district_fit_1.csv")
 
+    print(f"\n── Top-p MAE Summary ({args.mode}, n={len(block_rows)} {'regions' if args.match_stats else 'districts'}) ──")
+    block_df = pd.DataFrame(block_rows)
+    for m in metrics_row:  # same metric list used to build block_rows, so labels always match
+        if f'diff_{m}' not in block_df.columns:
+            continue
+        mae = block_df[f'diff_{m}'].abs().mean()
+        label = get_metric_label(m)
+        print(f"  {label:28s} MAE: {mae:6.2f}pp")
+    print(f"──────────────────────────────────────────────\n")
+
     if best_dist_util:
         util_rows = [{'district': d, 'obs_util': v['obs'], 'sim_util': v['sim'],
                       'diff_util': v['obs'] - v['sim']} for d, v in best_dist_util.items()]
@@ -461,10 +499,7 @@ if __name__ == '__main__':
 
     # Individual metric plots
     n_stats = len(next(iter(best_block.values()))['obs'])
-    if n_stats == 4:
-        metrics = ['top3', 'top5', 'top10', 'unmatched']
-    else:
-        metrics = [f'top{p}' for p in range(1, n_stats)] + ['unmatched']
+    metrics = get_metric_labels(n_stats, args.mode)
     for mi, key in enumerate(metrics):
         plot_metric(best_block, mi, key,
                     out_dir / f'{args.mode}_val_{key}_by_district.png', mode=args.mode)

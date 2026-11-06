@@ -7,8 +7,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-FONT   = 15
-LEGEND_FONT   = 12
+FONT   = 18
+LEGEND_FONT   = 15
 MSIZE  = 8
 LWIDTH = 2.5
 
