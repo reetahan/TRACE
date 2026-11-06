@@ -21,3 +21,5 @@
 .Rproj
 outputs/
 scripts/
+.claude/*
+.job_snapshots/*
